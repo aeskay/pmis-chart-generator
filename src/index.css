@@ -992,7 +992,6 @@ body {
 
 .data-table tbody tr {
   transition: background var(--t-fast);
-  cursor: pointer;
 }
 
 .data-table tbody tr:hover {
@@ -1201,11 +1200,13 @@ body {
 
 .cell-editable {
   position: relative;
-  cursor: cell;
+  cursor: pointer;
 }
 
 .cell-editable:hover {
-  background: rgba(59, 130, 246, 0.08);
+  background: rgba(59, 130, 246, 0.12);
+  outline: 1px dashed var(--accent-primary);
+  outline-offset: -1px;
 }
 
 .cell-edit-input {

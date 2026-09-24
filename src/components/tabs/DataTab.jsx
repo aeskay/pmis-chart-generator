@@ -521,7 +521,7 @@ export default function DataTab({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span>💡</span>
           <span>
-            <strong>Tip:</strong> Double-click any cell to edit inline. Press <code>Enter</code> to save, <code>Esc</code> to cancel, and <code>Ctrl+Z</code> to undo edits anytime.
+            <strong>Tip:</strong> Click any cell to edit inline. Press <code>Enter</code> to save, <code>Esc</code> to cancel, and <code>Ctrl+Z</code> to undo. Click 📈 to view condition charts.
           </span>
         </div>
         {selectedIds.size > 0 && (
@@ -598,8 +598,6 @@ export default function DataTab({
                 <tr
                   key={section.id}
                   className={`${isSelected ? 'active' : ''} ${isChecked ? 'row--selected' : ''}`}
-                  onClick={() => onSelectSection && onSelectSection(section.id)}
-                  title="Click to view condition charts for this section"
                 >
                   {/* Row Checkbox */}
                   <td
@@ -699,8 +697,9 @@ export default function DataTab({
                       <td
                         key={col.key}
                         className={`cell-editable ${col.mono ? 'mono' : ''}`}
+                        onClick={e => startEditing(section, col.key, e)}
                         onDoubleClick={e => startEditing(section, col.key, e)}
-                        title="Double-click to edit cell"
+                        title="Click to edit cell"
                       >
                         {displayVal ?? '—'}
                       </td>
@@ -742,8 +741,9 @@ export default function DataTab({
                       <td
                         key={k}
                         className="cell-editable mono"
+                        onClick={e => startEditing(section, k, e)}
                         onDoubleClick={e => startEditing(section, k, e)}
-                        title="Double-click to edit cell"
+                        title="Click to edit cell"
                       >
                         {val ?? '—'}
                       </td>
