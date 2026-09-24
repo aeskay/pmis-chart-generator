@@ -1,0 +1,11 @@
+# Netlify configuration for PMIS Chart Studio (React SPA)
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Redirect all routes to index.html for client-side routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
