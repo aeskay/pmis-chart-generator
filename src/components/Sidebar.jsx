@@ -9,6 +9,7 @@ import SectionList from './SectionList';
 
 export default function Sidebar({
   pmisFile,
+  pmisFileName,
   pmisLoading,
   pmisProgress,
   onLoadPmis,
@@ -17,11 +18,11 @@ export default function Sidebar({
   onSelectProject,
   onRenameProject,
   onDeleteProject,
-  onNewProject,
   sections,
   selectedSectionId,
   onSelectSection,
   onAddSections,
+  onUpdateSection,
   onDeleteSection,
   pmisMap,
   addToast,
@@ -39,7 +40,7 @@ export default function Sidebar({
     e.target.value = '';
   }
 
-  const fileName = pmisFile?.name || null;
+  const fileName = pmisFile?.name || pmisFileName || null;
 
   return (
     <aside className="sidebar" aria-label="Project sidebar">
@@ -83,13 +84,16 @@ export default function Sidebar({
             <div className="sidebar__pmis-path" title={fileName}>
               {fileName}
             </div>
+            <div style={{ fontSize: 11, color: '#10b981', marginTop: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 8 }}>●</span> Saved offline
+            </div>
             <button
               id="btn-browse-pmis"
-              className="btn btn--ghost btn--sm"
-              style={{ marginTop: 6, width: '100%', justifyContent: 'center' }}
+              className="btn btn--secondary btn--sm"
+              style={{ marginTop: 8, width: '100%', justifyContent: 'center' }}
               onClick={handleBrowseClick}
             >
-              Change file…
+              Change Database…
             </button>
           </div>
         ) : (
@@ -98,10 +102,10 @@ export default function Sidebar({
             <button
               id="btn-browse-pmis"
               className="btn btn--primary btn--sm"
-              style={{ marginTop: 6, width: '100%', justifyContent: 'center' }}
+              style={{ marginTop: 8, width: '100%', justifyContent: 'center' }}
               onClick={handleBrowseClick}
             >
-              Browse…
+              Browse PMIS Database…
             </button>
           </div>
         )}
@@ -115,7 +119,6 @@ export default function Sidebar({
           onSelect={onSelectProject}
           onRename={onRenameProject}
           onDelete={onDeleteProject}
-          onNew={onNewProject}
         />
 
         {selectedProjectId && (
@@ -126,6 +129,7 @@ export default function Sidebar({
               selectedSectionId={selectedSectionId}
               onSelect={onSelectSection}
               onAddSections={onAddSections}
+              onUpdateSection={onUpdateSection}
               onDelete={onDeleteSection}
               pmisMap={pmisMap}
               addToast={addToast}

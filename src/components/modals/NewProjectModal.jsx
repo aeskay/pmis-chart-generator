@@ -35,7 +35,7 @@ export default function NewProjectModal({ onConfirm, onCancel }) {
             <div className="modal__title">New Project</div>
             <div className="modal__subtitle">Give your project a descriptive name</div>
           </div>
-          <button className="modal__close" onClick={onCancel} aria-label="Close">
+          <button type="button" className="modal__close" onClick={onCancel} aria-label="Close">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M1 1l12 12M13 1L1 13" />
             </svg>

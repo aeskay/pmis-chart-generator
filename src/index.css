@@ -737,6 +737,7 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  padding: var(--sp-4);
   animation: fadeIn 150ms ease;
 }
 
@@ -747,8 +748,19 @@ body {
   box-shadow: var(--shadow-xl);
   display: flex;
   flex-direction: column;
-  max-height: 90vh;
+  max-height: min(90vh, 920px);
   animation: slideUp 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  overflow: hidden;
+  flex: 0 0 auto;
+  max-width: 96vw;
+}
+
+.modal > form,
+.modal__form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -798,7 +810,9 @@ body {
 .modal__body {
   padding: var(--sp-6);
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  overscroll-behavior: contain;
 }
 
 .modal__body::-webkit-scrollbar { width: 5px; }
@@ -816,6 +830,8 @@ body {
   padding: var(--sp-4) var(--sp-6);
   border-top: 1px solid var(--border-default);
   flex-shrink: 0;
+  background: var(--bg-panel);
+  z-index: 2;
 }
 
 /* ─── Form Elements ──────────────────────────────────────────────────────────── */
@@ -1142,3 +1158,87 @@ body {
   border-radius: var(--radius-full);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ─── Data Tab Enhancements ─────────────────────────────────────────────────── */
+.data-tab-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.data-tab-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.data-table th.sortable:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.data-table th .sort-indicator {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+.data-table th.sorted .sort-indicator {
+  opacity: 1;
+  color: var(--accent-primary);
+}
+
+.cell-editable {
+  position: relative;
+  cursor: cell;
+}
+
+.cell-editable:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.cell-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  font-size: inherit;
+  font-family: inherit;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  outline: 2px solid rgba(59, 130, 246, 0.25);
+}
+
+.row-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-secondary);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.row-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.row-action-btn--delete:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--error);
+}

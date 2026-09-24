@@ -22,11 +22,10 @@ const OPTIONAL_FIELDS = [
   { appKey: 'serviceLife',     label: 'Service Life' },
   { appKey: 'rehabMethod',     label: 'Rehab Method' },
   { appKey: 'countyName',      label: 'County Name' },
-  { appKey: 'oldSlabTh',       label: 'Old Slab Th' },
-  { appKey: 'slabTh',          label: 'Slab Th' },
-  { appKey: 'base',            label: 'Base' },
-  { appKey: 'baseTh',          label: 'Base Th' },
-  { appKey: 'sub',             label: 'Sub' },
+  { appKey: 'slabTh',          label: 'Slab Thickness' },
+  { appKey: 'base',            label: 'Base Type' },
+  { appKey: 'baseTh',          label: 'Base Thickness' },
+  { appKey: 'sub',             label: 'Subgrade' },
 ];
 
 // ─── Fuzzy auto-suggest ──────────────────────────────────────────────────────
@@ -42,11 +41,10 @@ const SUGGEST_MAP = {
   serviceLife:     ['service life', 'svc life', 'life'],
   rehabMethod:     ['rehab method', 'rehab', 'method', 'treatment'],
   countyName:      ['county', 'county name'],
-  oldSlabTh:       ['old slab th', 'old slab', 'old thickness'],
-  slabTh:          ['slab th', 'slab thickness', 'thickness'],
-  base:            ['base'],
-  baseTh:          ['base th', 'base thickness'],
-  sub:             ['sub', 'subbase', 'subgrade'],
+  slabTh:          ['slab thickness', 'slab th', 'thickness', 'old slab th', 'old slab', 'old thickness'],
+  base:            ['base type', 'base', 'base material'],
+  baseTh:          ['base thickness', 'base th', 'base depth'],
+  sub:             ['subgrade', 'sub', 'subbase'],
 };
 
 function autoSuggest(appKey, headers) {
@@ -85,7 +83,6 @@ function buildSection(row, mappings, customMappings) {
     serviceLife:     parseInt(get('serviceLife'), 10)     || null,
     rehabMethod:     String(get('rehabMethod')  ?? '').trim() || null,
     countyName:      String(get('countyName')   ?? '').trim() || null,
-    oldSlabTh:       parseFloat(get('oldSlabTh')) || null,
     slabTh:          parseFloat(get('slabTh'))    || null,
     base:            String(get('base') ?? '').trim() || null,
     baseTh:          parseFloat(get('baseTh'))   || null,
@@ -214,7 +211,7 @@ export default function ColumnMappingModal({ csvHeaders, csvRows, onImport, onCa
               {csvRows.length} rows detected · Match your CSV columns to the app fields below
             </div>
           </div>
-          <button className="modal__close" onClick={onCancel} aria-label="Close">
+          <button type="button" className="modal__close" onClick={onCancel} aria-label="Close">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M1 1l12 12M13 1L1 13" />
             </svg>

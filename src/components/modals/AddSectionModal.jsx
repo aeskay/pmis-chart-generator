@@ -1,8 +1,8 @@
 /**
  * AddSectionModal.jsx
- * Form to manually add a single section with all required + optional fields.
+ * Form to manually add or edit a section with all required + optional fields.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
 const REQUIRED_FIELDS = [
@@ -14,22 +14,47 @@ const REQUIRED_FIELDS = [
 ];
 
 const OPTIONAL_FIELDS = [
-  { key: 'sn',              label: 'S/N',            type: 'text',   placeholder: '1' },
-  { key: 'yearConstructed', label: 'Year Constructed',type: 'number', placeholder: '1998' },
-  { key: 'endOfLife',       label: 'End of Life',     type: 'number', placeholder: '2018' },
-  { key: 'serviceLife',     label: 'Service Life',    type: 'number', placeholder: '20' },
-  { key: 'rehabMethod',     label: 'Rehab Method',    type: 'text',   placeholder: 'Reconstruction' },
-  { key: 'countyName',      label: 'County Name',     type: 'text',   placeholder: 'TARRANT' },
-  { key: 'oldSlabTh',       label: 'Old Slab Th',     type: 'number', placeholder: '' },
-  { key: 'slabTh',          label: 'Slab Th',         type: 'number', placeholder: '' },
-  { key: 'base',            label: 'Base',            type: 'text',   placeholder: '' },
-  { key: 'baseTh',          label: 'Base Th',         type: 'number', placeholder: '' },
-  { key: 'sub',             label: 'Sub',             type: 'text',   placeholder: '' },
+  { key: 'sn',              label: 'S/N',             type: 'text',   placeholder: '1' },
+  { key: 'yearConstructed', label: 'Year Constructed', type: 'number', placeholder: '1998' },
+  { key: 'endOfLife',       label: 'End of Life',      type: 'number', placeholder: '2018' },
+  { key: 'serviceLife',     label: 'Service Life',     type: 'number', placeholder: '20' },
+  { key: 'rehabMethod',     label: 'Rehab Method',     type: 'text',   placeholder: 'Reconstruction' },
+  { key: 'countyName',      label: 'County Name',      type: 'text',   placeholder: 'TARRANT' },
+  { key: 'slabTh',          label: 'Slab Thickness',   type: 'number', placeholder: 'inches' },
+  { key: 'base',            label: 'Base Type',        type: 'text',   placeholder: '' },
+  { key: 'baseTh',          label: 'Base Thickness',   type: 'number', placeholder: 'inches' },
+  { key: 'sub',             label: 'Subgrade',         type: 'text',   placeholder: '' },
 ];
 
-export default function AddSectionModal({ onAdd, onCancel, existingIds = new Set() }) {
+export default function AddSectionModal({
+  onAdd,
+  onSave,
+  onCancel,
+  initialData = null,
+  existingIds = new Set(),
+}) {
+  const isEditing = Boolean(initialData);
   const [form, setForm] = useState({});
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    if (initialData) {
+      setForm({
+        ...initialData,
+        beginRef: initialData.beginRef ?? '',
+        endRef: initialData.endRef ?? '',
+        yearConstructed: initialData.yearConstructed ?? '',
+        endOfLife: initialData.endOfLife ?? '',
+        serviceLife: initialData.serviceLife ?? '',
+        slabTh: initialData.slabTh ?? initialData.oldSlabTh ?? '',
+        base: initialData.base ?? '',
+        baseTh: initialData.baseTh ?? '',
+        sub: initialData.sub ?? '',
+      });
+    } else {
+      setForm({});
+    }
+  }, [initialData]);
 
   function set(key, value) {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -39,11 +64,14 @@ export default function AddSectionModal({ onAdd, onCancel, existingIds = new Set
   function validate() {
     const errs = {};
     for (const f of REQUIRED_FIELDS) {
-      const v = form[f.key]?.trim?.() ?? form[f.key];
-      if (!v && v !== 0) errs[f.key] = 'Required';
+      const v = form[f.key]?.toString().trim();
+      if (!v && v !== '0') errs[f.key] = 'Required';
     }
-    if (existingIds.has(form.id?.trim())) {
-      errs.id = 'This ID already exists in the project';
+    const enteredId = form.id?.toString().trim();
+    if (!isEditing || enteredId !== initialData?.id) {
+      if (existingIds.has(enteredId)) {
+        errs.id = 'This ID already exists in the project';
+      }
     }
     const begin = parseFloat(form.beginRef);
     const end   = parseFloat(form.endRef);
@@ -59,38 +87,42 @@ export default function AddSectionModal({ onAdd, onCancel, existingIds = new Set
     if (!validate()) return;
 
     const section = {
-      _uuid: uuidv4(),
-      id:              form.id?.trim(),
-      sn:              form.sn?.trim() || null,
-      district:        form.district?.trim(),
-      highway:         form.highway?.trim(),
+      ...(initialData || {}),
+      _uuid:           initialData?._uuid || uuidv4(),
+      id:              form.id?.toString().trim(),
+      sn:              form.sn?.toString().trim() || null,
+      district:        form.district?.toString().trim(),
+      highway:         form.highway?.toString().trim(),
       beginRef:        parseFloat(form.beginRef),
       endRef:          parseFloat(form.endRef),
       yearConstructed: form.yearConstructed ? parseInt(form.yearConstructed, 10) : null,
       endOfLife:       form.endOfLife       ? parseInt(form.endOfLife, 10)       : null,
       serviceLife:     form.serviceLife     ? parseInt(form.serviceLife, 10)     : null,
-      rehabMethod:     form.rehabMethod?.trim() || null,
-      countyName:      form.countyName?.trim()  || null,
-      oldSlabTh:       form.oldSlabTh  ? parseFloat(form.oldSlabTh)  : null,
+      rehabMethod:     form.rehabMethod?.toString().trim() || null,
+      countyName:      form.countyName?.toString().trim()  || null,
       slabTh:          form.slabTh     ? parseFloat(form.slabTh)     : null,
-      base:            form.base?.trim()   || null,
+      base:            form.base?.toString().trim()   || null,
       baseTh:          form.baseTh     ? parseFloat(form.baseTh)     : null,
-      sub:             form.sub?.trim()    || null,
-      columnMappings:  {},
-      extraColumns:    {},
+      sub:             form.sub?.toString().trim()    || null,
+      columnMappings:  initialData?.columnMappings || {},
+      extraColumns:    initialData?.extraColumns || {},
     };
 
-    onAdd(section);
+    if (isEditing && onSave) {
+      onSave(section);
+    } else if (onAdd) {
+      onAdd(section);
+    }
   }
 
   function renderField(field) {
     return (
       <div className="form-group" key={field.key}>
-        <label className="form-label" htmlFor={`add-sec-${field.key}`}>
+        <label className="form-label" htmlFor={`sec-field-${field.key}`}>
           {field.label}
         </label>
         <input
-          id={`add-sec-${field.key}`}
+          id={`sec-field-${field.key}`}
           className={`form-input${errors[field.key] ? ' form-input--error' : ''}`}
           type={field.type}
           placeholder={field.placeholder}
@@ -108,16 +140,18 @@ export default function AddSectionModal({ onAdd, onCancel, existingIds = new Set
       className="modal-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="Add Section"
+      aria-label={isEditing ? 'Edit Section' : 'Add Section'}
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div className="modal modal--md">
         <div className="modal__header">
           <div>
-            <div className="modal__title">Add Section</div>
-            <div className="modal__subtitle">Enter section details manually</div>
+            <div className="modal__title">{isEditing ? 'Edit Section' : 'Add Section'}</div>
+            <div className="modal__subtitle">
+              {isEditing ? `Modify details for section ${initialData.id}` : 'Enter section details manually'}
+            </div>
           </div>
-          <button className="modal__close" onClick={onCancel} aria-label="Close">
+          <button type="button" className="modal__close" onClick={onCancel} aria-label="Close">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M1 1l12 12M13 1L1 13" />
             </svg>
@@ -148,7 +182,7 @@ export default function AddSectionModal({ onAdd, onCancel, existingIds = new Set
               Cancel
             </button>
             <button id="btn-confirm-add-section" type="submit" className="btn btn--primary">
-              Add Section
+              {isEditing ? 'Save Changes' : 'Add Section'}
             </button>
           </div>
         </form>

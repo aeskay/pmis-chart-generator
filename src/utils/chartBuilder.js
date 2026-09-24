@@ -11,19 +11,38 @@ import { cleanDistrictString, normalizeHighway } from './normalizers';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Build the map lookup key from a section object.
+ * Parses highway into base name and roadbed suffix (e.g., 'SH190R' -> base: 'SH190', explicitSuffix: 'R')
  */
-function sectionKey(section) {
+export function parseHighwayComponents(highwayStr) {
+  const norm = normalizeHighway(highwayStr || '');
+  const match = norm.match(/^([A-Z]+\d+)([RLKAXY])?$/);
+  if (match) {
+    return {
+      base: match[1],
+      explicitSuffix: match[2] || '',
+    };
+  }
+  return {
+    base: norm,
+    explicitSuffix: '',
+  };
+}
+
+/**
+ * Build the map lookup key from a section object, avoiding double suffixes.
+ */
+function sectionKey(section, suffix = '') {
   const district = cleanDistrictString(section.district || '');
-  const highway  = normalizeHighway(section.highway || '');
-  return `${district}|${highway}`;
+  const { base, explicitSuffix } = parseHighwayComponents(section.highway);
+  const finalSuffix = suffix || explicitSuffix || '';
+  return `${district}|${base}${finalSuffix}`;
 }
 
 /**
  * Get all PMIS records that spatially overlap the section's reference range.
  */
 function getOverlapping(pmisMap, section, suffix = '') {
-  const key = sectionKey(section) + suffix;
+  const key = sectionKey(section, suffix);
   const start = parseFloat(section.beginRef);
   const end   = parseFloat(section.endRef);
 
@@ -74,6 +93,9 @@ export function buildEvalData(pmisMap, section, suffix = '') {
   const end   = parseFloat(section.endRef);
   const byYear = {};
 
+  let pmisMinRef = Infinity;
+  let pmisMaxRef = -Infinity;
+
   for (const p of records) {
     if (!byYear[p.year]) {
       byYear[p.year] = {
@@ -92,6 +114,9 @@ export function buildEvalData(pmisMap, section, suffix = '') {
       if (p.conditionScore !== null) { y.wCondition += p.conditionScore * w; y.lenCondition += w; }
       if (p.rideScore      !== null) { y.wRide      += p.rideScore      * w; y.lenRide      += w; }
       if (p.iri            !== null) { y.wIri       += p.iri            * w; y.lenIri       += w; }
+
+      if (typeof p.startRef === 'number' && p.startRef < pmisMinRef) pmisMinRef = p.startRef;
+      if (typeof p.endRef   === 'number' && p.endRef   > pmisMaxRef) pmisMaxRef = p.endRef;
     }
   }
 
@@ -102,6 +127,8 @@ export function buildEvalData(pmisMap, section, suffix = '') {
     conditionScore: years.map(y => byYear[y].lenCondition > 0 ? byYear[y].wCondition / byYear[y].lenCondition : null),
     rideScore:      years.map(y => byYear[y].lenRide      > 0 ? byYear[y].wRide      / byYear[y].lenRide      : null),
     iriScore:       years.map(y => byYear[y].lenIri       > 0 ? byYear[y].wIri       / byYear[y].lenIri       : null),
+    pmisStartRef:   isFinite(pmisMinRef) ? pmisMinRef : null,
+    pmisEndRef:     isFinite(pmisMaxRef) ? pmisMaxRef : null,
   };
 }
 
@@ -113,7 +140,7 @@ export function buildEvalData(pmisMap, section, suffix = '') {
  * @param {Map<string, Object[]>} pmisMap
  * @param {Object} section
  * @param {string} suffix
- * @returns {{ years, acpPerMile, pccPerMile, punchPerMile, spallPerMile, yMax, step } | null}
+ * @returns {{ years, acpPerMile, pccPerMile, punchPerMile, spallPerMile, yMax, step, pmisStartRef, pmisEndRef } | null}
  */
 export function buildDistressData(pmisMap, section, suffix = '') {
   const records = getOverlapping(pmisMap, section, suffix);
@@ -122,6 +149,9 @@ export function buildDistressData(pmisMap, section, suffix = '') {
   const start = parseFloat(section.beginRef);
   const end   = parseFloat(section.endRef);
   const byYear = {};
+
+  let pmisMinRef = Infinity;
+  let pmisMaxRef = -Infinity;
 
   for (const p of records) {
     if (!byYear[p.year]) byYear[p.year] = { acp: 0, pcc: 0, punch: 0, spall: 0, len: 0 };
@@ -139,6 +169,9 @@ export function buildDistressData(pmisMap, section, suffix = '') {
       y.punch += (p.punchout      || 0) * ratio;
       y.spall += (p.spalledCracks || 0) * ratio;
       y.len   += w;
+
+      if (typeof p.startRef === 'number' && p.startRef < pmisMinRef) pmisMinRef = p.startRef;
+      if (typeof p.endRef   === 'number' && p.endRef   > pmisMaxRef) pmisMaxRef = p.endRef;
     }
   }
 
@@ -155,7 +188,17 @@ export function buildDistressData(pmisMap, section, suffix = '') {
   const step    = niceTickStep(maxVal);
   const yMax    = Math.ceil((maxVal + step * 0.5) / step) * step;
 
-  return { years, acpPerMile, pccPerMile, punchPerMile, spallPerMile, yMax, step };
+  return {
+    years,
+    acpPerMile,
+    pccPerMile,
+    punchPerMile,
+    spallPerMile,
+    yMax,
+    step,
+    pmisStartRef: isFinite(pmisMinRef) ? pmisMinRef : null,
+    pmisEndRef:   isFinite(pmisMaxRef) ? pmisMaxRef : null,
+  };
 }
 
 // ─── Chart 3: Aggregate Distress across all sections ─────────────────────────
@@ -241,4 +284,93 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'fisca
   const yMax    = Math.max(Math.ceil((maxVal + step * 0.5) / step) * step, step);
 
   return { xLabels, acpPerMile, pccPerMile, punchPerMile, spallPerMile, sectionCounts, yMax, step };
+}
+
+/**
+ * Detailed diagnostics explaining why a section does or does not display charts.
+ *
+ * @param {Map<string, Object[]>} pmisMap
+ * @param {Object} section
+ * @returns {Object|null}
+ */
+export function getSectionDiagnostics(pmisMap, section) {
+  if (!pmisMap || !section) return null;
+
+  const district = cleanDistrictString(section.district || '');
+  const highwayNorm = normalizeHighway(section.highway || '');
+  const start = parseFloat(section.beginRef);
+  const end = parseFloat(section.endRef);
+
+  const potentialSuffixes = ['', 'R', 'L', 'K', 'A', 'X', 'Y'];
+  const roadbedMatches = [];
+
+  for (const sfx of potentialSuffixes) {
+    const key = `${district}|${highwayNorm}${sfx}`;
+    const records = pmisMap.get(key);
+    if (records && records.length > 0) {
+      let minRef = Infinity;
+      let maxRef = -Infinity;
+      let overlappingCount = 0;
+      const yearsSet = new Set();
+
+      for (const r of records) {
+        if (r.startRef < minRef) minRef = r.startRef;
+        if (r.endRef > maxRef) maxRef = r.endRef;
+        yearsSet.add(r.year);
+        if (r.startRef < end && r.endRef > start) {
+          overlappingCount++;
+        }
+      }
+
+      roadbedMatches.push({
+        suffix: sfx || '(Main)',
+        key,
+        totalRecords: records.length,
+        overlappingCount,
+        minRef: minRef === Infinity ? 0 : minRef,
+        maxRef: maxRef === -Infinity ? 0 : maxRef,
+        years: Array.from(yearsSet).sort((a, b) => a - b),
+      });
+    }
+  }
+
+  // Similar highways check if no match in district
+  const nearbyHighways = [];
+  if (roadbedMatches.length === 0) {
+    for (const k of pmisMap.keys()) {
+      const [dist, hwy] = k.split('|');
+      if (dist === district && hwy.includes(highwayNorm.replace(/[0-9]/g, ''))) {
+        nearbyHighways.push(hwy);
+        if (nearbyHighways.length >= 8) break;
+      }
+    }
+  }
+
+  const hasHighwayInDistrict = roadbedMatches.length > 0;
+  const hasOverlappingData = roadbedMatches.some(r => r.overlappingCount > 0);
+
+  let status = 'ok';
+  let message = 'PMIS data loaded successfully.';
+
+  if (!hasHighwayInDistrict) {
+    status = 'highway_not_found';
+    message = `Highway "${section.highway}" was not found in District "${section.district}".`;
+  } else if (!hasOverlappingData) {
+    status = 'out_of_range';
+    const ranges = roadbedMatches.map(r => `Roadbed ${r.suffix}: ${r.minRef.toFixed(3)} – ${r.maxRef.toFixed(3)} mi`).join(', ');
+    message = `Highway found in PMIS, but reference markers ${start} – ${end} do not overlap. Available PMIS range: ${ranges}.`;
+  }
+
+  return {
+    district,
+    highwayNorm,
+    requestedStart: start,
+    requestedEnd: end,
+    status, // 'ok' | 'out_of_range' | 'highway_not_found'
+    message,
+    hasHighwayInDistrict,
+    hasOverlappingData,
+    roadbedMatches,
+    nearbyHighways,
+  };
 }

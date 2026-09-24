@@ -81,14 +81,9 @@ export default function ProjectList({
     <>
       <div className="project-list__header">
         <span className="sidebar__section-title" style={{ marginBottom: 0 }}>Projects</span>
-        <button
-          id="btn-new-project"
-          className="btn btn--primary btn--sm"
-          onClick={onNew}
-          title="New project"
-        >
-          + New
-        </button>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          {projects.length}
+        </span>
       </div>
 
       {projects.length === 0 && (

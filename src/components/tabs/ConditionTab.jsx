@@ -2,10 +2,18 @@
  * ConditionTab.jsx
  * Shows Chart A (Evaluation Scores) + Chart B (Distress Counts) for the selected section.
  */
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import PlotlyChart from '../PlotlyChart';
 import { buildEvalData, buildDistressData, niceTickStep } from '../../utils/chartBuilder';
 import { cleanDistrictString, normalizeHighway } from '../../utils/normalizers';
+import { exportSectionToExcel } from '../../utils/excelExporter';
+
+// ─── Format helper ──────────────────────────────────────────────────────────
+function formatRef(val) {
+  if (val === null || val === undefined || val === '') return '—';
+  const num = parseFloat(val);
+  return isNaN(num) ? String(val) : num.toFixed(3);
+}
 
 // ─── Vertical line helper ────────────────────────────────────────────────────
 function vline(x, color, label) {
@@ -28,7 +36,7 @@ function buildEvalLayout(section, years) {
   const yearConst = parseInt(section.yearConstructed, 10);
   const endOfLife = parseInt(section.endOfLife, 10);
 
-  if (!isNaN(yearConst)) lines.push(vline(yearConst, '#22c55e', 'Year Const.'));
+  if (!isNaN(yearConst)) lines.push(vline(yearConst, '#050505', 'Construction Year'));
   if (!isNaN(endOfLife)) lines.push(vline(endOfLife, '#ef4444', 'End of Life'));
 
   const minYr = (years[0] ?? 1996);
@@ -38,16 +46,16 @@ function buildEvalLayout(section, years) {
     template: 'plotly_white',
     paper_bgcolor: '#ffffff',
     plot_bgcolor: '#ffffff',
-    margin: { t: 60, b: 155, l: 75, r: 90 },
-    height: 390,
+    margin: { t: 45, b: 100, l: 75, r: 85 },
+    height: 400,
     legend: {
-      orientation: 'h', yanchor: 'top', y: -0.22, xanchor: 'center', x: 0.5,
+      orientation: 'h', yanchor: 'top', y: -0.27, xanchor: 'center', x: 0.5,
       font: { size: 12 }, bordercolor: '#000', borderwidth: 1,
     },
     hovermode: 'x unified',
     barmode: 'group',
     xaxis: {
-      title: { text: '<b>Fiscal Year</b>', font: { size: 14 } },
+      title: { text: '<b>Year</b>', font: { size: 14 } },
       range: [minYr - 0.7, maxYr + 0.7],
       tickmode: 'linear', dtick: 1, tickangle: -45,
       tickfont: { size: 12 },
@@ -61,7 +69,7 @@ function buildEvalLayout(section, years) {
       showline: true, linewidth: 2, linecolor: '#000', mirror: true, ticks: 'inside',
     },
     yaxis2: {
-      title: { text: '<b>Ride Score</b>', font: { size: 13, color: '#d62728' } },
+      title: { text: '<b>Average Ride Score</b>', font: { size: 13, color: '#d62728' } },
       tickfont: { size: 12, color: '#d62728' },
       range: [0, 5.25], dtick: 0.5, tickformat: '.1f',
       overlaying: 'y', side: 'right',
@@ -91,16 +99,16 @@ function buildDistLayout(section, distData) {
     template: 'plotly_white',
     paper_bgcolor: '#ffffff',
     plot_bgcolor: '#ffffff',
-    margin: { t: 50, b: 155, l: 95, r: 40 },
-    height: 390,
+    margin: { t: 45, b: 100, l: 85, r: 35 },
+    height: 400,
     legend: {
-      orientation: 'h', yanchor: 'top', y: -0.22, xanchor: 'center', x: 0.5,
+      orientation: 'h', yanchor: 'top', y: -0.27, xanchor: 'center', x: 0.5,
       font: { size: 12 }, bordercolor: '#000', borderwidth: 1,
     },
     hovermode: 'x unified',
     barmode: 'group',
     xaxis: {
-      title: { text: '<b>Fiscal Year</b>', font: { size: 14 } },
+      title: { text: '<b>Year</b>', font: { size: 14 } },
       range: [minYr - 0.7, maxYr + 0.7],
       tickmode: 'linear', dtick: 1, tickangle: -45,
       tickfont: { size: 12 },
@@ -148,10 +156,55 @@ function InfoCard({ label, value, accent }) {
 }
 
 function RoadbedCharts({ section, pmisMap, suffix }) {
+  const evalChartRef = useRef(null);
+  const distChartRef = useRef(null);
+  const [copiedEval, setCopiedEval] = useState(false);
+  const [copiedDist, setCopiedDist] = useState(false);
+  const [copyingEval, setCopyingEval] = useState(false);
+  const [copyingDist, setCopyingDist] = useState(false);
+
+  const handleCopyEval = async () => {
+    if (!evalChartRef.current || copyingEval) return;
+    try {
+      setCopyingEval(true);
+      await evalChartRef.current.copyImage();
+      setCopiedEval(true);
+      setTimeout(() => setCopiedEval(false), 2000);
+    } catch (err) {
+      alert('Could not copy image to clipboard: ' + (err.message || err));
+    } finally {
+      setCopyingEval(false);
+    }
+  };
+
+  const handleCopyDist = async () => {
+    if (!distChartRef.current || copyingDist) return;
+    try {
+      setCopyingDist(true);
+      await distChartRef.current.copyImage();
+      setCopiedDist(true);
+      setTimeout(() => setCopiedDist(false), 2000);
+    } catch (err) {
+      alert('Could not copy image to clipboard: ' + (err.message || err));
+    } finally {
+      setCopyingDist(false);
+    }
+  };
+
   const evalData = useMemo(() => buildEvalData(pmisMap, section, suffix), [pmisMap, section, suffix]);
   const distData = useMemo(() => buildDistressData(pmisMap, section, suffix), [pmisMap, section, suffix]);
 
   if (!evalData && !distData) return null;
+
+  const actualRangeStr = `${formatRef(section.beginRef)} – ${formatRef(section.endRef)}`;
+
+  const evalPmisRangeStr = evalData?.pmisStartRef != null && evalData?.pmisEndRef != null
+    ? `${formatRef(evalData.pmisStartRef)} – ${formatRef(evalData.pmisEndRef)}`
+    : 'None (No matching PMIS data)';
+
+  const distPmisRangeStr = distData?.pmisStartRef != null && distData?.pmisEndRef != null
+    ? `${formatRef(distData.pmisStartRef)} – ${formatRef(distData.pmisEndRef)}`
+    : 'None (No matching PMIS data)';
 
   const evalTraces = evalData ? [
     {
@@ -196,12 +249,55 @@ function RoadbedCharts({ section, pmisMap, suffix }) {
       </h3>
       {/* Chart A — Evaluation Scores */}
       <div className="chart-panel">
-        <div className="chart-panel__title">Evaluation Scores{titleSuffix}</div>
-        <div className="chart-panel__sub">
-          Weighted averages by overlap length · dashed lines mark Year Const. (green) and End of Life (red)
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+          <div>
+            <div className="chart-panel__title">Evaluation Scores{titleSuffix}</div>
+            <div className="chart-panel__sub" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
+              <span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>RM (Actual):</span>{' '}
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)' }}>{actualRangeStr}</span>
+              </span>
+              <span style={{ color: 'var(--border-strong)' }}>·</span>
+              <span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>RM (PMIS):</span>{' '}
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent-primary)' }}>{evalPmisRangeStr}</span>
+              </span>
+            </div>
+          </div>
+          {evalTraces.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={handleCopyEval}
+                disabled={copyingEval}
+                title="Copy chart image to clipboard (paste directly into PowerPoint / Word)"
+                style={{ gap: 5, fontSize: '12px' }}
+              >
+                <span>{copiedEval ? '✓' : copyingEval ? '⏳' : '📋'}</span>
+                <span>{copiedEval ? 'Copied!' : copyingEval ? 'Copying…' : 'Copy Image'}</span>
+              </button>
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={() => evalChartRef.current?.download()}
+                title="Download chart as PNG (compact / report format)"
+                style={{ gap: 5, fontSize: '12px' }}
+              >
+                <span>📷</span> Download PNG
+              </button>
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={() => exportSectionToExcel(section, pmisMap)}
+                title="Export this section's evaluation and distress data to Excel (.xlsx)"
+                style={{ gap: 5, fontSize: '12px' }}
+              >
+                <span>📥</span> Export Excel
+              </button>
+            </div>
+          )}
         </div>
         {evalTraces.length > 0 ? (
           <PlotlyChart
+            ref={evalChartRef}
             data={evalTraces}
             layout={evalLayout}
             filename={`eval_${section.id}_${section.highway}${suffix}`}
@@ -216,12 +312,55 @@ function RoadbedCharts({ section, pmisMap, suffix }) {
 
       {/* Chart B — Distress Counts */}
       <div className="chart-panel">
-        <div className="chart-panel__title">Distress Counts per Centerline Mile{titleSuffix}</div>
-        <div className="chart-panel__sub">
-          Apportioned by overlap fraction · dashed lines mark Year Const. (green) and End of Life (red)
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+          <div>
+            <div className="chart-panel__title">Distress Counts per Centerline Mile{titleSuffix}</div>
+            <div className="chart-panel__sub" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
+              <span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>RM (Actual):</span>{' '}
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)' }}>{actualRangeStr}</span>
+              </span>
+              <span style={{ color: 'var(--border-strong)' }}>·</span>
+              <span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>RM (PMIS):</span>{' '}
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent-primary)' }}>{distPmisRangeStr}</span>
+              </span>
+            </div>
+          </div>
+          {distTraces.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={handleCopyDist}
+                disabled={copyingDist}
+                title="Copy chart image to clipboard (paste directly into PowerPoint / Word)"
+                style={{ gap: 5, fontSize: '12px' }}
+              >
+                <span>{copiedDist ? '✓' : copyingDist ? '⏳' : '📋'}</span>
+                <span>{copiedDist ? 'Copied!' : copyingDist ? 'Copying…' : 'Copy Image'}</span>
+              </button>
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={() => distChartRef.current?.download()}
+                title="Download chart as PNG (compact / report format)"
+                style={{ gap: 5, fontSize: '12px' }}
+              >
+                <span>📷</span> Download PNG
+              </button>
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={() => exportSectionToExcel(section, pmisMap)}
+                title="Export this section's evaluation and distress data to Excel (.xlsx)"
+                style={{ gap: 5, fontSize: '12px' }}
+              >
+                <span>📥</span> Export Excel
+              </button>
+            </div>
+          )}
         </div>
         {distTraces.length > 0 ? (
           <PlotlyChart
+            ref={distChartRef}
             data={distTraces}
             layout={distLayout}
             filename={`distress_${section.id}_${section.highway}${suffix}`}
