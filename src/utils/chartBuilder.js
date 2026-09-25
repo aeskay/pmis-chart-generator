@@ -204,86 +204,164 @@ export function buildDistressData(pmisMap, section, suffix = '') {
 // ─── Chart 3: Aggregate Distress across all sections ─────────────────────────
 
 /**
- * Build aggregate distress data across all sections in a project.
+ * Build aggregate distress data across sections in a project.
  *
  * @param {Map<string, Object[]>} pmisMap
  * @param {Object[]} sections
- * @param {'fiscal'|'age'} alignMode - 'fiscal' = absolute year, 'age' = fiscal − yearConstructed
- * @returns {{ xLabels: number[], acpPerMile, pccPerMile, punchPerMile, spallPerMile, sectionCounts, yMax, step } | null}
+ * @param {'age'|'fiscal'} alignMode - 'age' = fiscal − yearConstructed, 'fiscal' = absolute calendar year
+ * @param {string} [specificRoadbed] - Optional: filter to specific roadbed ('R', 'L', etc.) or '' for all
+ * @returns {{
+ *   xLabels: number[],
+ *   acpPerMile: (number|null)[],
+ *   pccPerMile: (number|null)[],
+ *   punchPerMile: (number|null)[],
+ *   spallPerMile: (number|null)[],
+ *   totalDistressPerMile: (number|null)[],
+ *   sectionCounts: number[],
+ *   totalMiles: number[],
+ *   yMax: number,
+ *   step: number,
+ *   validSectionsCount: number,
+ *   maxCount: number,
+ * } | null}
  */
-export function buildAggregateDistressData(pmisMap, sections, alignMode = 'fiscal') {
-  if (!sections.length) return null;
+export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age', specificRoadbed = 'all') {
+  if (!pmisMap || !sections || !sections.length) return null;
 
-  const aggByX = {}; // x-label → { acp, pcc, punch, spall, len, sectionCount }
+  // Map of x (Age or Fiscal Year) -> accumulated data
+  const aggByX = new Map(); // x -> { acp: 0, pcc: 0, punch: 0, spall: 0, totalLen: 0, sections: Set<sectionId> }
+  const validSectionIds = new Set();
 
   for (const section of sections) {
-    const records = getOverlapping(pmisMap, section);
-    if (!records.length) continue;
-
+    const district = cleanDistrictString(section.district || '');
+    const { base } = parseHighwayComponents(section.highway);
     const start = parseFloat(section.beginRef);
-    const end   = parseFloat(section.endRef);
+    const end = parseFloat(section.endRef);
     const yearConst = parseInt(section.yearConstructed, 10);
-    const byYear = {};
 
-    for (const p of records) {
-      if (!byYear[p.year]) byYear[p.year] = { acp: 0, pcc: 0, punch: 0, spall: 0, len: 0 };
-      const y = byYear[p.year];
+    if (isNaN(start) || isNaN(end)) continue;
+    if (alignMode === 'age' && (isNaN(yearConst) || yearConst <= 1900)) continue;
 
-      const overlapStart = Math.max(start, p.startRef);
-      const overlapEnd   = Math.min(end,   p.endRef);
-      const w = Math.max(0, overlapEnd - overlapStart);
+    // Determine which roadbed suffixes to query for this section
+    const potentialSuffixes = ['', 'R', 'L', 'K', 'A'];
+    const activeSuffixes = specificRoadbed === 'all'
+      ? potentialSuffixes
+      : [specificRoadbed];
 
-      if (w > 0) {
-        const segLen = Math.max(0.001, p.endRef - p.startRef);
-        const ratio  = w / segLen;
-        y.acp   += (p.acpPatches    || 0) * ratio;
-        y.pcc   += (p.pccPatches    || 0) * ratio;
-        y.punch += (p.punchout      || 0) * ratio;
-        y.spall += (p.spalledCracks || 0) * ratio;
-        y.len   += w;
+    let sectionContributed = false;
+
+    // Collect distress per year for this section (aggregated across matching roadbeds)
+    const byYear = {}; // year -> { acp: 0, pcc: 0, punch: 0, spall: 0, len: 0 }
+
+    for (const sfx of activeSuffixes) {
+      const key = `${district}|${base}${sfx}`;
+      const records = pmisMap.get(key);
+      if (!records || !records.length) continue;
+
+      for (const p of records) {
+        const overlapStart = Math.max(start, p.startRef);
+        const overlapEnd = Math.min(end, p.endRef);
+        const w = Math.max(0, overlapEnd - overlapStart);
+
+        if (w > 0) {
+          if (!byYear[p.year]) {
+            byYear[p.year] = { acp: 0, pcc: 0, punch: 0, spall: 0, len: 0 };
+          }
+          const y = byYear[p.year];
+          const segLen = Math.max(0.001, p.endRef - p.startRef);
+          const ratio = w / segLen;
+
+          y.acp += (p.acpPatches || 0) * ratio;
+          y.pcc += (p.pccPatches || 0) * ratio;
+          y.punch += (p.punchout || 0) * ratio;
+          y.spall += (p.spalledCracks || 0) * ratio;
+          y.len += w;
+        }
       }
     }
 
-    for (const [yr, vals] of Object.entries(byYear)) {
+    for (const [yrStr, vals] of Object.entries(byYear)) {
       if (vals.len <= 0) continue;
-      const fiscalYear = Number(yr);
-      let x;
-      if (alignMode === 'age') {
-        if (!isNaN(yearConst)) {
-          x = fiscalYear - yearConst;
-        } else {
-          continue; // can't compute age without yearConstructed
-        }
-      } else {
-        x = fiscalYear;
+      const fiscalYear = Number(yrStr);
+      const x = alignMode === 'age' ? (fiscalYear - yearConst) : fiscalYear;
+
+      // Filter negative ages if any anomalous evaluation dates occur prior to construction
+      if (alignMode === 'age' && x < 0) continue;
+
+      if (!aggByX.has(x)) {
+        aggByX.set(x, { acp: 0, pcc: 0, punch: 0, spall: 0, totalLen: 0, sectionIds: new Set() });
       }
 
-      if (!aggByX[x]) aggByX[x] = { acp: 0, pcc: 0, punch: 0, spall: 0, len: 0, sectionCount: 0 };
-      const a = aggByX[x];
-      a.acp   += vals.acp / vals.len;
-      a.pcc   += vals.pcc / vals.len;
-      a.punch += vals.punch / vals.len;
-      a.spall += vals.spall / vals.len;
-      a.len   += 1; // accumulate section count per x
-      a.sectionCount += 1;
+      const agg = aggByX.get(x);
+      agg.acp += vals.acp;
+      agg.pcc += vals.pcc;
+      agg.punch += vals.punch;
+      agg.spall += vals.spall;
+      agg.totalLen += vals.len;
+      agg.sectionIds.add(section.id || section.sn || `${section.highway}_${start}`);
+
+      sectionContributed = true;
+    }
+
+    if (sectionContributed) {
+      validSectionIds.add(section.id || section.sn || `${section.highway}_${start}`);
     }
   }
 
-  const xLabels = Object.keys(aggByX).map(Number).sort((a, b) => a - b);
+  const xLabels = Array.from(aggByX.keys()).sort((a, b) => a - b);
   if (!xLabels.length) return null;
 
-  const acpPerMile   = xLabels.map(x => aggByX[x].len > 0 ? aggByX[x].acp   / aggByX[x].len : null);
-  const pccPerMile   = xLabels.map(x => aggByX[x].len > 0 ? aggByX[x].pcc   / aggByX[x].len : null);
-  const punchPerMile = xLabels.map(x => aggByX[x].len > 0 ? aggByX[x].punch / aggByX[x].len : null);
-  const spallPerMile = xLabels.map(x => aggByX[x].len > 0 ? aggByX[x].spall / aggByX[x].len : null);
-  const sectionCounts = xLabels.map(x => aggByX[x].sectionCount);
+  const safeRate = (val, len) => (len > 0 ? val / len : null);
 
-  const allVals = [...acpPerMile, ...pccPerMile, ...punchPerMile, ...spallPerMile].filter(v => v !== null);
-  const maxVal  = allVals.length ? Math.max(...allVals) : 0;
-  const step    = niceTickStep(maxVal);
-  const yMax    = Math.max(Math.ceil((maxVal + step * 0.5) / step) * step, step);
+  const acpPerMile = [];
+  const pccPerMile = [];
+  const punchPerMile = [];
+  const spallPerMile = [];
+  const totalDistressPerMile = [];
+  const sectionCounts = [];
+  const totalMiles = [];
 
-  return { xLabels, acpPerMile, pccPerMile, punchPerMile, spallPerMile, sectionCounts, yMax, step };
+  let maxCount = 0;
+
+  for (const x of xLabels) {
+    const agg = aggByX.get(x);
+    const acp = safeRate(agg.acp, agg.totalLen);
+    const pcc = safeRate(agg.pcc, agg.totalLen);
+    const punch = safeRate(agg.punch, agg.totalLen);
+    const spall = safeRate(agg.spall, agg.totalLen);
+
+    acpPerMile.push(acp);
+    pccPerMile.push(pcc);
+    punchPerMile.push(punch);
+    spallPerMile.push(spall);
+    totalDistressPerMile.push((acp || 0) + (pcc || 0) + (punch || 0) + (spall || 0));
+
+    const count = agg.sectionIds.size;
+    sectionCounts.push(count);
+    if (count > maxCount) maxCount = count;
+
+    totalMiles.push(Math.round(agg.totalLen * 100) / 100);
+  }
+
+  // Calculate yMax for stacked bars
+  const maxStack = Math.max(...totalDistressPerMile, 0.5);
+  const step = niceTickStep(maxStack);
+  const yMax = Math.ceil((maxStack + step * 0.5) / step) * step;
+
+  return {
+    xLabels,
+    acpPerMile,
+    pccPerMile,
+    punchPerMile,
+    spallPerMile,
+    totalDistressPerMile,
+    sectionCounts,
+    totalMiles,
+    yMax,
+    step,
+    validSectionsCount: validSectionIds.size,
+    maxCount,
+  };
 }
 
 /**

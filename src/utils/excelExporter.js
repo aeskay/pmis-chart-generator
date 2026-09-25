@@ -214,3 +214,56 @@ export function exportProjectToExcel(project, selectedSections, pmisMap) {
 
   XLSX.writeFile(wb, fileName);
 }
+
+/**
+ * Export aggregate distress accumulation data to Excel.
+ */
+export function exportAggregateDistressToExcel(aggData, title = 'Distress_Accumulation', alignMode = 'age') {
+  if (!aggData || !aggData.xLabels || !aggData.xLabels.length) return;
+
+  const wb = XLSX.utils.book_new();
+  const xColHeader = alignMode === 'age' ? 'Years Since Construction (Age)' : 'Evaluation Year';
+
+  const rows = [
+    [
+      xColHeader,
+      'Number of Sections',
+      'Total Centerline Miles',
+      'Punchouts (per mile)',
+      'ACP Patches (per mile)',
+      'PCC Patches (per mile)',
+      'Spalled Cracks (per mile)',
+      'Total Distress (per mile)',
+    ],
+  ];
+
+  for (let i = 0; i < aggData.xLabels.length; i++) {
+    rows.push([
+      aggData.xLabels[i],
+      aggData.sectionCounts[i] ?? 0,
+      aggData.totalMiles?.[i] ?? '',
+      roundVal(aggData.punchPerMile[i], 3),
+      roundVal(aggData.acpPerMile[i], 3),
+      roundVal(aggData.pccPerMile[i], 3),
+      roundVal(aggData.spallPerMile[i], 3),
+      roundVal(aggData.totalDistressPerMile[i], 3),
+    ]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [
+    { wch: 30 },
+    { wch: 20 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 24 },
+    { wch: 24 },
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Distress_Accumulation');
+  const safeName = title.replace(/[\\/:*?"<>|]/g, '_').trim();
+  XLSX.writeFile(wb, `${safeName}.xlsx`);
+}
+

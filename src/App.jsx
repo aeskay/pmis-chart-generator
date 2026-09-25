@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import Sidebar from './components/Sidebar';
 import ConditionTab from './components/tabs/ConditionTab';
+import DistressTab from './components/tabs/DistressTab';
 import DataTab from './components/tabs/DataTab';
 import ToastContainer from './components/ToastContainer';
 import NewProjectModal from './components/modals/NewProjectModal';
@@ -37,8 +38,9 @@ import { loadAppData, saveAppData, addRecentProject } from './utils/appDataStore
 import { get, set } from 'idb-keyval';
 
 const TABS = [
-  { id: 'condition', label: 'Condition',  icon: '📈' },
-  { id: 'data',      label: 'Data',       icon: '📋' },
+  { id: 'condition', label: 'Condition', icon: '📈' },
+  { id: 'distress',  label: 'Distress',  icon: '📊' },
+  { id: 'data',       label: 'Data',      icon: '📋' },
 ];
 
 const SAVE_DEBOUNCE_MS = 800;
@@ -626,6 +628,16 @@ export default function App() {
             {activeTab === 'condition' && (
               <ConditionTab
                 section={selectedSection}
+                pmisMap={pmisMap}
+                pmisLoading={pmisLoading}
+                pmisProgress={pmisProgress}
+              />
+            )}
+            {activeTab === 'distress' && (
+              <DistressTab
+                project={selectedProject}
+                sections={projectSections}
+                selectedSection={selectedSection}
                 pmisMap={pmisMap}
                 pmisLoading={pmisLoading}
                 pmisProgress={pmisProgress}
