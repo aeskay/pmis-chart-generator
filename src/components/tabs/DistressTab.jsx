@@ -9,8 +9,9 @@
 
 import React, { useMemo, useState, useRef } from 'react';
 import PlotlyChart from '../PlotlyChart';
-import { buildAggregateDistressData } from '../../utils/chartBuilder';
+import { buildAggregateDistressData, niceTickStep } from '../../utils/chartBuilder';
 import { exportAggregateDistressToExcel } from '../../utils/excelExporter';
+
 
 function InfoMetric({ label, value, sub, accent }) {
   return (
