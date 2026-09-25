@@ -231,8 +231,10 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
   // Map of x (Age or Fiscal Year) -> accumulated data
   const aggByX = new Map(); // x -> { acp: 0, pcc: 0, punch: 0, spall: 0, totalLen: 0, sections: Set<sectionId> }
   const validSectionIds = new Set();
+  const roadbedCounts = { R: 0, L: 0, '': 0, K: 0, A: 0 };
 
   for (const section of sections) {
+
     const district = cleanDistrictString(section.district || '');
     const { base } = parseHighwayComponents(section.highway);
     const start = parseFloat(section.beginRef);
@@ -243,12 +245,17 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
     if (alignMode === 'age' && (isNaN(yearConst) || yearConst <= 1900)) continue;
 
     // Determine which roadbed suffixes to query for this section
-    const potentialSuffixes = ['', 'R', 'L', 'K', 'A'];
-    const activeSuffixes = specificRoadbed === 'all'
-      ? potentialSuffixes
-      : [specificRoadbed];
+    let activeSuffixes = ['R', 'L'];
+    if (specificRoadbed === 'LR') {
+      activeSuffixes = ['L', 'R'];
+    } else if (specificRoadbed === 'all') {
+      activeSuffixes = ['R', 'L', '', 'K', 'A'];
+    } else {
+      activeSuffixes = [specificRoadbed];
+    }
 
     let sectionContributed = false;
+    const roadbedsContributedThisSection = new Set();
 
     // Collect distress per year for this section (aggregated across matching roadbeds)
     const byYear = {}; // year -> { acp: 0, pcc: 0, punch: 0, spall: 0, len: 0 }
@@ -257,6 +264,8 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
       const key = `${district}|${base}${sfx}`;
       const records = pmisMap.get(key);
       if (!records || !records.length) continue;
+
+      let rbedContributed = false;
 
       for (const p of records) {
         const overlapStart = Math.max(start, p.startRef);
@@ -276,7 +285,13 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
           y.punch += (p.punchout || 0) * ratio;
           y.spall += (p.spalledCracks || 0) * ratio;
           y.len += w;
+
+          rbedContributed = true;
         }
+      }
+
+      if (rbedContributed) {
+        roadbedsContributedThisSection.add(sfx);
       }
     }
 
@@ -305,6 +320,9 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
 
     if (sectionContributed) {
       validSectionIds.add(section.id || section.sn || `${section.highway}_${start}`);
+      for (const sfx of roadbedsContributedThisSection) {
+        roadbedCounts[sfx] = (roadbedCounts[sfx] || 0) + 1;
+      }
     }
   }
 
@@ -361,7 +379,9 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
     step,
     validSectionsCount: validSectionIds.size,
     maxCount,
+    roadbedCounts,
   };
+
 }
 
 /**

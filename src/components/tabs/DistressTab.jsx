@@ -49,8 +49,9 @@ export default function DistressTab({
   const chartRef = useRef(null);
   const [scope, setScope] = useState('project'); // 'project' | 'selected'
   const [alignMode, setAlignMode] = useState('age'); // 'age' | 'fiscal'
-  const [roadbedFilter, setRoadbedFilter] = useState('all'); // 'all' | 'R' | 'L' | 'K' | 'A' | ''
+  const [roadbedFilter, setRoadbedFilter] = useState('LR'); // 'LR' | 'R' | 'L' | 'all'
   const [copyingChart, setCopyingChart] = useState(false);
+
 
   // Active sections based on scope
   const targetSections = useMemo(() => {
@@ -92,8 +93,10 @@ export default function DistressTab({
       peakX,
       peakDistress: maxDistress > 0 ? maxDistress.toFixed(2) : '0.00',
       maxSectionCount: aggData.maxCount,
+      roadbedCounts: aggData.roadbedCounts || { R: 0, L: 0 },
     };
   }, [aggData, targetSections]);
+
 
   // Copy PNG to clipboard
   const handleCopyChart = async () => {
@@ -388,11 +391,10 @@ export default function DistressTab({
                 fontSize: '12px',
               }}
             >
-              <option value="all">All Roadbeds (R + L + Main)</option>
+              <option value="LR">L & R (Divided Roadbeds)</option>
               <option value="R">R only (Right / East / North)</option>
               <option value="L">L only (Left / West / South)</option>
-              <option value="K">K only</option>
-              <option value="A">A only</option>
+              <option value="all">All Roadbeds (L, R, Main, K, A)</option>
             </select>
           </div>
         </div>
@@ -439,6 +441,18 @@ export default function DistressTab({
             accent="var(--accent-secondary)"
           />
           <InfoMetric
+            label="Roadbed Breakdown"
+            value={`L: ${stats.roadbedCounts['L'] || 0}  |  R: ${stats.roadbedCounts['R'] || 0}`}
+            sub={
+              roadbedFilter === 'R'
+                ? 'Filtered to R roadbeds'
+                : roadbedFilter === 'L'
+                ? 'Filtered to L roadbeds'
+                : 'Sections matching L and R'
+            }
+            accent="#a855f7"
+          />
+          <InfoMetric
             label={alignMode === 'age' ? 'Max Age Observed' : 'Year Span'}
             value={alignMode === 'age' ? `${stats.maxAge} yrs` : `${stats.minAge} – ${stats.maxAge}`}
             sub={alignMode === 'age' ? `Span: 0 to ${stats.maxAge} yrs` : `${aggData.xLabels.length} evaluation years`}
@@ -458,6 +472,7 @@ export default function DistressTab({
           />
         </div>
       )}
+
 
       {/* ── Chart Container ── */}
       <div className="chart-panel" style={{ background: '#ffffff', color: '#000000', padding: '20px' }}>
