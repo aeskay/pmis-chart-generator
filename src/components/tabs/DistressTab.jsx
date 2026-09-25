@@ -50,22 +50,60 @@ export default function DistressTab({
   const [scope, setScope] = useState('project'); // 'project' | 'selected'
   const [alignMode, setAlignMode] = useState('age'); // 'age' | 'fiscal'
   const [roadbedFilter, setRoadbedFilter] = useState('LR'); // 'LR' | 'R' | 'L' | 'all'
+  const [slabThFilter, setSlabThFilter] = useState('all'); // 'all' | specific slab thickness (e.g., '10', '12', etc.)
   const [copyingChart, setCopyingChart] = useState(false);
 
-
-  // Active sections based on scope
-  const targetSections = useMemo(() => {
-    if (scope === 'selected') {
-      return selectedSection ? [selectedSection] : [];
+  // Discover all distinct slab thicknesses in the project
+  const availableSlabThicknesses = useMemo(() => {
+    if (!sections || !sections.length) return [];
+    const set = new Set();
+    for (const s of sections) {
+      const val = s.slabTh ?? s.oldSlabTh;
+      if (val !== undefined && val !== null && String(val).trim() !== '') {
+        const num = parseFloat(val);
+        if (!isNaN(num)) {
+          set.add(num);
+        } else {
+          set.add(String(val).trim());
+        }
+      }
     }
-    return sections || [];
-  }, [scope, selectedSection, sections]);
+    return Array.from(set).sort((a, b) => {
+      if (typeof a === 'number' && typeof b === 'number') return a - b;
+      return String(a).localeCompare(String(b));
+    });
+  }, [sections]);
+
+  // Active sections based on scope and slab thickness filter
+  const targetSections = useMemo(() => {
+    let pool = [];
+    if (scope === 'selected') {
+      pool = selectedSection ? [selectedSection] : [];
+    } else {
+      pool = sections || [];
+    }
+
+    if (slabThFilter !== 'all') {
+      return pool.filter(s => {
+        const raw = s.slabTh ?? s.oldSlabTh;
+        if (raw === undefined || raw === null || String(raw).trim() === '') return false;
+        const num = parseFloat(raw);
+        if (!isNaN(num)) {
+          return Math.abs(num - parseFloat(slabThFilter)) < 0.01;
+        }
+        return String(raw).trim().toLowerCase() === String(slabThFilter).trim().toLowerCase();
+      });
+    }
+
+    return pool;
+  }, [scope, selectedSection, sections, slabThFilter]);
 
   // Aggregate distress data
   const aggData = useMemo(() => {
     if (!pmisMap || !targetSections.length) return null;
     return buildAggregateDistressData(pmisMap, targetSections, alignMode, roadbedFilter);
   }, [pmisMap, targetSections, alignMode, roadbedFilter]);
+
 
   // Summary statistics
   const stats = useMemo(() => {
@@ -397,7 +435,40 @@ export default function DistressTab({
               <option value="all">All Roadbeds (L, R, Main, K, A)</option>
             </select>
           </div>
+
+          {/* Slab Thickness filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Slab Thickness:</span>
+            <select
+              value={slabThFilter}
+              onChange={(e) => setSlabThFilter(e.target.value)}
+              style={{
+                background: 'var(--bg-elevated)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '4px 8px',
+                fontSize: '12px',
+              }}
+            >
+              <option value="all">All Thicknesses ({sections.length} sec)</option>
+              {availableSlabThicknesses.map(th => {
+                const count = (sections || []).filter(s => {
+                  const raw = s.slabTh ?? s.oldSlabTh;
+                  const num = parseFloat(raw);
+                  if (!isNaN(num) && typeof th === 'number') return Math.abs(num - th) < 0.01;
+                  return String(raw).trim().toLowerCase() === String(th).trim().toLowerCase();
+                }).length;
+                return (
+                  <option key={th} value={th}>
+                    {th}" ({count} {count === 1 ? 'sec' : 'secs'})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
+
 
         {/* Action buttons */}
         {aggData && (
@@ -440,6 +511,13 @@ export default function DistressTab({
             sub={alignMode === 'age' ? 'With construction year' : 'With PMIS data'}
             accent="var(--accent-secondary)"
           />
+
+          <InfoMetric
+            label="Slab Thickness"
+            value={slabThFilter === 'all' ? 'All' : `${slabThFilter}"`}
+            sub={slabThFilter === 'all' ? `${availableSlabThicknesses.length} distinct sizes` : `${stats.totalTracked} filtered sections`}
+            accent="var(--accent-primary)"
+          />
           <InfoMetric
             label="Roadbed Breakdown"
             value={`L: ${stats.roadbedCounts['L'] || 0}  |  R: ${stats.roadbedCounts['R'] || 0}`}
@@ -479,16 +557,18 @@ export default function DistressTab({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
           <div>
             <h2 className="chart-panel__title" style={{ color: '#000000', fontSize: '18px' }}>
-              Average Distress Accumulation Over Time
+              Average Distress Accumulation Over Time {slabThFilter !== 'all' ? `(${slabThFilter}" Slab)` : ''}
             </h2>
             <p className="chart-panel__sub" style={{ color: '#555555', marginBottom: 0 }}>
               {alignMode === 'age'
                 ? 'Apportioned distress per centerline mile aligned by section age (Years Since Construction)'
                 : 'Apportioned distress per centerline mile grouped by PMIS evaluation calendar year'}
-              {scope === 'selected' && selectedSection ? ` — Section ${selectedSection.id} (${selectedSection.highway})` : ` — Project: ${project?.name || 'All Sections'}`}
+              {slabThFilter !== 'all' ? ` · Filtered to ${slabThFilter}" slab thickness` : ''}
+              {scope === 'selected' && selectedSection ? ` · Section ${selectedSection.id} (${selectedSection.highway})` : ` · Project: ${project?.name || 'All Sections'}`}
             </p>
           </div>
         </div>
+
 
         {aggData && traces.length > 0 ? (
           <PlotlyChart
