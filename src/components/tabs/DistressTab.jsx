@@ -144,14 +144,53 @@ export default function DistressTab({
     const maxAge = Math.max(...aggData.xLabels);
     const minAge = Math.min(...aggData.xLabels);
     
-    // Find age of peak distress
+    // Find peak total distress and individual peak distresses
     let maxDistress = -1;
     let peakX = null;
+
+    let maxPunch = -1;
+    let peakPunchX = null;
+
+    let maxAcp = -1;
+    let peakAcpX = null;
+
+    let maxPcc = -1;
+    let peakPccX = null;
+
+    let maxSpall = -1;
+    let peakSpallX = null;
+
     for (let i = 0; i < aggData.xLabels.length; i++) {
+      const x = aggData.xLabels[i];
+
       const d = aggData.totalDistressPerMile[i] || 0;
       if (d > maxDistress) {
         maxDistress = d;
-        peakX = aggData.xLabels[i];
+        peakX = x;
+      }
+
+      const punch = aggData.punchPerMile[i] || 0;
+      if (punch > maxPunch) {
+        maxPunch = punch;
+        peakPunchX = x;
+      }
+
+      const acp = aggData.acpPerMile[i] || 0;
+      if (acp > maxAcp) {
+        maxAcp = acp;
+        peakAcpX = x;
+      }
+
+      const pcc = aggData.pccPerMile[i] || 0;
+      if (pcc > maxPcc) {
+        maxPcc = pcc;
+        peakPccX = x;
+      }
+
+      const spall = aggData.spallPerMile[i] || 0;
+      if (spall > maxSpall) {
+        maxSpall = spall;
+        peakSpallX = x;
       }
     }
 
@@ -162,10 +201,19 @@ export default function DistressTab({
       minAge,
       peakX,
       peakDistress: maxDistress > 0 ? maxDistress.toFixed(2) : '0.00',
+      maxPunch: maxPunch > 0 ? maxPunch.toFixed(2) : '0.00',
+      peakPunchX,
+      maxAcp: maxAcp > 0 ? maxAcp.toFixed(2) : '0.00',
+      peakAcpX,
+      maxPcc: maxPcc > 0 ? maxPcc.toFixed(2) : '0.00',
+      peakPccX,
+      maxSpall: maxSpall > 0 ? maxSpall.toFixed(2) : '0.00',
+      peakSpallX,
       maxSectionCount: aggData.maxCount,
       roadbedCounts: aggData.roadbedCounts || { R: 0, L: 0 },
     };
   }, [aggData, targetSections]);
+
 
 
   // Copy PNG to clipboard
@@ -690,6 +738,30 @@ export default function DistressTab({
             accent="var(--error)"
           />
           <InfoMetric
+            label="Max Punchouts (PCH)"
+            value={`${stats.maxPunch} /mi`}
+            sub={stats.peakPunchX !== null ? (alignMode === 'age' ? `At age ${stats.peakPunchX}` : `In year ${stats.peakPunchX}`) : 'None'}
+            accent="#d62728"
+          />
+          <InfoMetric
+            label="Max ACP Patches"
+            value={`${stats.maxAcp} /mi`}
+            sub={stats.peakAcpX !== null ? (alignMode === 'age' ? `At age ${stats.peakAcpX}` : `In year ${stats.peakAcpX}`) : 'None'}
+            accent="#1f77b4"
+          />
+          <InfoMetric
+            label="Max PCC Patches"
+            value={`${stats.maxPcc} /mi`}
+            sub={stats.peakPccX !== null ? (alignMode === 'age' ? `At age ${stats.peakPccX}` : `In year ${stats.peakPccX}`) : 'None'}
+            accent="#555555"
+          />
+          <InfoMetric
+            label="Max Spalled Cracks"
+            value={`${stats.maxSpall} /mi`}
+            sub={stats.peakSpallX !== null ? (alignMode === 'age' ? `At age ${stats.peakSpallX}` : `In year ${stats.peakSpallX}`) : 'None'}
+            accent="#ff7f0e"
+          />
+          <InfoMetric
             label="Max Section Sample"
             value={stats.maxSectionCount}
             sub="Peak concurrent sections"
@@ -697,6 +769,7 @@ export default function DistressTab({
           />
         </div>
       )}
+
 
 
       {/* ── Chart Container ── */}
