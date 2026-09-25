@@ -53,6 +53,38 @@ export default function DistressTab({
   const [slabThFilter, setSlabThFilter] = useState('all'); // 'all' | specific slab thickness (e.g., '10', '12', etc.)
   const [copyingChart, setCopyingChart] = useState(false);
 
+  // ── Persistent Primary Y-Axis controls (min, max, interval) ─────────────────
+  const [yAxisConfig, setYAxisConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('pmis_distress_yaxis_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          custom: Boolean(parsed.custom),
+          min: parsed.min ?? 0,
+          max: parsed.max ?? '',
+          dtick: parsed.dtick ?? '',
+        };
+      }
+    } catch (e) {
+      console.warn('Could not read saved y-axis config', e);
+    }
+    return { custom: false, min: 0, max: '', dtick: '' };
+  });
+
+  const updateYAxisConfig = (updates) => {
+    setYAxisConfig(prev => {
+      const next = { ...prev, ...updates };
+      try {
+        localStorage.setItem('pmis_distress_yaxis_config', JSON.stringify(next));
+      } catch (e) {
+        console.warn('Could not persist y-axis config', e);
+      }
+      return next;
+    });
+  };
+
+
   // Discover all distinct slab thicknesses in the project
   const availableSlabThicknesses = useMemo(() => {
     if (!sections || !sections.length) return [];
@@ -266,6 +298,21 @@ export default function DistressTab({
     ? '<b>Years Since Construction (Age)</b>'
     : '<b>Evaluation Year</b>';
 
+  // Determine primary Y-axis range and step
+  let effectiveYMin = 0;
+  let effectiveYMax = aggData?.yMax ?? 10;
+  let effectiveYStep = aggData?.step ?? 1;
+
+  if (yAxisConfig.custom) {
+    const parsedMin = parseFloat(yAxisConfig.min);
+    const parsedMax = parseFloat(yAxisConfig.max);
+    const parsedStep = parseFloat(yAxisConfig.dtick);
+
+    if (!isNaN(parsedMin)) effectiveYMin = parsedMin;
+    if (!isNaN(parsedMax) && parsedMax > effectiveYMin) effectiveYMax = parsedMax;
+    if (!isNaN(parsedStep) && parsedStep > 0) effectiveYStep = parsedStep;
+  }
+
   const layout = aggData ? {
     template: 'plotly_white',
     paper_bgcolor: '#ffffff',
@@ -298,8 +345,8 @@ export default function DistressTab({
     },
     yaxis: {
       title: { text: '<b>Avg. distress per centerline mile</b>', font: { size: 15, color: '#000' } },
-      range: [0, aggData.yMax],
-      dtick: aggData.step,
+      range: [effectiveYMin, effectiveYMax],
+      dtick: effectiveYStep,
       tickfont: { size: 12, color: '#000' },
       showline: true,
       linewidth: 2,
@@ -309,6 +356,7 @@ export default function DistressTab({
       gridcolor: 'rgba(0,0,0,0.1)',
     },
     yaxis2: {
+
       title: { text: '<b>Number of Sections</b>', font: { size: 15, color: '#000' } },
       overlaying: 'y',
       side: 'right',
@@ -467,7 +515,106 @@ export default function DistressTab({
               })}
             </select>
           </div>
+
+          {/* Primary Y-Axis Custom Scale Controls */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'var(--bg-elevated)',
+              border: yAxisConfig.custom ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)',
+              padding: '3px 8px',
+              transition: 'border-color 0.2s',
+            }}
+          >
+            <span style={{ fontSize: '12px', fontWeight: 600, color: yAxisConfig.custom ? 'var(--accent-secondary)' : 'var(--text-secondary)' }}>
+              Y-Axis:
+            </span>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+              Min:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig.min}
+                placeholder="0"
+                onChange={(e) => updateYAxisConfig({ min: e.target.value, custom: true })}
+                style={{
+                  width: '46px',
+                  background: 'var(--bg-panel)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '2px 4px',
+                  fontSize: '11px',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+              Max:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig.max}
+                placeholder={aggData ? String(aggData.yMax) : '10'}
+                onChange={(e) => updateYAxisConfig({ max: e.target.value, custom: true })}
+                style={{
+                  width: '50px',
+                  background: 'var(--bg-panel)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '2px 4px',
+                  fontSize: '11px',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+              Interval:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig.dtick}
+                placeholder={aggData ? String(aggData.step) : '1'}
+                onChange={(e) => updateYAxisConfig({ dtick: e.target.value, custom: true })}
+                style={{
+                  width: '46px',
+                  background: 'var(--bg-panel)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '2px 4px',
+                  fontSize: '11px',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            {yAxisConfig.custom && (
+              <button
+                type="button"
+                onClick={() => updateYAxisConfig({ custom: false, min: 0, max: '', dtick: '' })}
+                className="btn btn--sm"
+                title="Reset to Auto scaling"
+                style={{
+                  fontSize: '11px',
+                  padding: '2px 6px',
+                  background: 'transparent',
+                  color: 'var(--accent-secondary)',
+                  border: '1px solid var(--border-accent)',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  marginLeft: '4px',
+                }}
+              >
+                ↺ Auto
+              </button>
+            )}
+          </div>
         </div>
+
 
 
         {/* Action buttons */}
