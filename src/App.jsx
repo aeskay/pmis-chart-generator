@@ -275,11 +275,23 @@ export default function App() {
         cachedAt: new Date().toISOString(),
       });
     } catch (err) {
-      addToast('error', 'Failed to parse PMIS', err.message);
+      console.error('PMIS Loading Error:', err);
+      const isStringTooLong = err?.message?.includes('0x1fffffe8') || err?.code === 'ERR_STRING_TOO_LONG' || err?.message?.includes('string longer than');
+      if (isStringTooLong) {
+        addToast(
+          'error',
+          'Excel file too large for browser memory',
+          'This Excel sheet exceeds the 512MB memory buffer limit. Please save or export it as a .CSV file and upload the .csv directly.',
+          9000
+        );
+      } else {
+        addToast('error', 'Failed to parse PMIS', err.message);
+      }
     } finally {
       setPmisLoading(false);
     }
   }, [addToast, mutate]);
+
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   useEffect(() => {
