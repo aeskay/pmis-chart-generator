@@ -257,7 +257,7 @@ export default function ColumnMappingModal({ csvHeaders, csvRows, existingSectio
                 </span>
               </div>
               <div style={{ color: 'var(--text-secondary)' }}>
-                Matching sections will be updated with your newly mapped columns (such as CSJ) without creating duplicate sections.
+                Matching sections will be updated with your newly mapped columns without creating duplicate sections.
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 4 }}>
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '12px' }}>
@@ -268,7 +268,7 @@ export default function ColumnMappingModal({ csvHeaders, csvRows, existingSectio
                     checked={importMode === 'merge'}
                     onChange={() => setImportMode('merge')}
                   />
-                  <span><strong>Smart Merge (Recommended):</strong> Update matched columns (e.g. CSJ) & keep existing unmapped data</span>
+                  <span><strong>Smart Merge (Recommended):</strong> Update matched columns with new values & preserve existing unmapped data</span>
                 </label>
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '12px' }}>
                   <input
