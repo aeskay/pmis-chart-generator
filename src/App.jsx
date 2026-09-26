@@ -38,6 +38,11 @@ import {
 import { clearCurrentFileHandle } from './utils/fileApi';
 import { loadAppData, saveAppData, addRecentProject } from './utils/appDataStore';
 import { get, set } from 'idb-keyval';
+import {
+  hydrateSectionsWithCachedCoordinates,
+  batchSaveCoordinatesToCache,
+  saveCoordinatesToCache,
+} from './utils/txdotGisApi';
 
 const TABS = [
   { id: 'condition',    label: 'Condition',    icon: '📈' },
@@ -122,14 +127,24 @@ export default function App() {
                 return prev;
               });
             } else {
-              // Populate state from cloud
-              setState(prev => ({
-                ...prev,
-                projects: cloudProjects,
-              }));
-              setSelectedProjectId(prevId => {
-                if (cloudProjects.some(p => p.id === prevId)) return prevId;
-                return cloudProjects[0]?.id || null;
+              // Populate state from cloud and hydrate with persistent GPS cache if needed
+              Promise.all(
+                cloudProjects.map(async (p) => {
+                  if (Array.isArray(p.sections)) {
+                    const { sections } = await hydrateSectionsWithCachedCoordinates(p.sections);
+                    return { ...p, sections };
+                  }
+                  return p;
+                })
+              ).then(hydratedProjects => {
+                setState(prev => ({
+                  ...prev,
+                  projects: hydratedProjects,
+                }));
+                setSelectedProjectId(prevId => {
+                  if (hydratedProjects.some(p => p.id === prevId)) return prevId;
+                  return hydratedProjects[0]?.id || null;
+                });
               });
             }
           },
@@ -184,10 +199,26 @@ export default function App() {
     }).catch(err => console.warn('Failed to load cached PMIS:', err));
 
     // 2. Restore last working state (projects & sections) from IndexedDB
-    get('pmis-chart-studio:currentWorkingState').then(savedState => {
+    get('pmis-chart-studio:currentWorkingState').then(async (savedState) => {
       if (savedState && Array.isArray(savedState.projects) && savedState.projects.length > 0) {
-        setState(savedState);
-        setSelectedProjectId(savedState.projects[0].id);
+        // Hydrate any sections that might be missing coordinates from persistent GPS cache
+        let hasAnyHydration = false;
+        const hydratedProjects = await Promise.all(
+          savedState.projects.map(async (p) => {
+            if (Array.isArray(p.sections)) {
+              const { sections, hasUpdates } = await hydrateSectionsWithCachedCoordinates(p.sections);
+              if (hasUpdates) hasAnyHydration = true;
+              return { ...p, sections };
+            }
+            return p;
+          })
+        );
+        const finalState = { ...savedState, projects: hydratedProjects };
+        setState(finalState);
+        setSelectedProjectId(hydratedProjects[0].id);
+        if (hasAnyHydration) {
+          set('pmis-chart-studio:currentWorkingState', finalState).catch(console.warn);
+        }
       }
     }).catch(err => console.warn('Failed to load saved projects:', err));
   }, []);
@@ -428,10 +459,14 @@ export default function App() {
   }, []);
 
   // ── Section actions ────────────────────────────────────────────────────────
-  const handleAddSections = useCallback((newSections, importMode = 'merge') => {
+  const handleAddSections = useCallback(async (newSections, importMode = 'merge') => {
     if (!selectedProjectId) return;
     let addedCount = 0;
     let updatedCount = 0;
+
+    // Check persistent GPS cache for any coordinates already generated for these sections
+    const { sections: hydratedIncoming, hasUpdates } = await hydrateSectionsWithCachedCoordinates(newSections);
+    const sectionsToProcess = hydratedIncoming || newSections;
 
     mutate(prev => {
       const nextProjects = prev.projects.map(p => {
@@ -439,14 +474,18 @@ export default function App() {
 
         if (importMode === 'overwrite') {
           // Replace any existing section with matching ID, or append if new
-          const incomingMap = new Map(newSections.map(s => [String(s.id).trim().toLowerCase(), s]));
+          const incomingMap = new Map(sectionsToProcess.map(s => [String(s.id).trim().toLowerCase(), s]));
           const nextSections = p.sections.map(existing => {
             const key = String(existing.id).trim().toLowerCase();
             if (incomingMap.has(key)) {
               const incoming = incomingMap.get(key);
               incomingMap.delete(key);
               updatedCount++;
-              return { ...incoming, _uuid: existing._uuid || incoming._uuid };
+              return {
+                ...incoming,
+                _uuid: existing._uuid || incoming._uuid,
+                coordinates: incoming.coordinates || existing.coordinates || null,
+              };
             }
             return existing;
           });
@@ -465,7 +504,7 @@ export default function App() {
 
         const mergedSections = [...p.sections];
 
-        for (const incoming of newSections) {
+        for (const incoming of sectionsToProcess) {
           const key = String(incoming.id).trim().toLowerCase();
           if (existingKeyMap.has(key)) {
             // Update existing section: update non-null, non-empty incoming fields
@@ -478,6 +517,9 @@ export default function App() {
                 updated[k] = v;
               }
             }
+
+            // Ensure coordinates are preserved from existing if incoming is empty, or restored from cache
+            updated.coordinates = incoming.coordinates || existing.coordinates || null;
 
             // Ensure ID and _uuid are preserved/consistent
             updated._uuid = existing._uuid || incoming._uuid;
@@ -570,6 +612,9 @@ export default function App() {
 
   const handleUpdateSection = useCallback((updatedSection) => {
     if (!selectedProjectId) return;
+    if (updatedSection.coordinates?.status === 'success') {
+      saveCoordinatesToCache(updatedSection, updatedSection.coordinates);
+    }
     mutate(prev => {
       const nextProjects = prev.projects.map(p => {
         if (p.id !== selectedProjectId) return p;
@@ -594,6 +639,9 @@ export default function App() {
 
   const handleBatchUpdateSections = useCallback((updatedSectionsList) => {
     if (!selectedProjectId || !Array.isArray(updatedSectionsList) || updatedSectionsList.length === 0) return;
+    // Persist all generated coordinates to the persistent GPS cache in IndexedDB
+    batchSaveCoordinatesToCache(updatedSectionsList);
+
     const updateMap = new Map(updatedSectionsList.map(s => [s._uuid || s.id, s]));
     mutate(prev => {
       const nextProjects = prev.projects.map(p => {

@@ -7,13 +7,25 @@
  * as well as undivided (KG) highways.
  */
 
+import { get, set } from 'idb-keyval';
+
 const RM_FEATURE_SERVER = 'https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Reference_Markers/FeatureServer/0/query';
 const ROADWAYS_FEATURE_SERVER = 'https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Roadways/FeatureServer/0/query';
 const CLOUDHUB_DFO_URL = 'https://lrs-ext.us-e1.cloudhub.io/api/elrs/v1/dfo';
 
-// In-memory cache for network responses during session
+// Storage keys for persistent caching in IndexedDB
+const GPS_CACHE_STORE_KEY = 'pmis-gis:coordinates-cache-v1';
+const RM_CACHE_STORE_KEY = 'pmis-gis:rm-cache-v1';
+const ROADWAYS_CACHE_STORE_KEY = 'pmis-gis:roadways-cache-v1';
+
+// In-memory caches for instant access
 const cacheRM = new Map();       // key: paddedRoute (e.g. 'SH0225') -> Array of RM features
 const cacheRoadways = new Map(); // key: routeId (e.g. 'SH0225-RG') -> Feature with paths [ [lon, lat, m], ... ]
+const memoryGpsCache = new Map(); // key: route:beginRef:endRef -> full coordinates object
+
+let isGpsCacheHydrated = false;
+let isRmCacheHydrated = false;
+let isRoadwaysCacheHydrated = false;
 
 /**
  * Normalizes highway strings into TxDOT LRS standard format.
@@ -45,10 +57,22 @@ export function normalizeTxDOTRoute(highwayStr) {
 
 /**
  * Query reference markers for a given padded route (e.g. 'SH0225') from TxDOT ArcGIS Online.
+ * Persists in IndexedDB so requests are only made once per route.
  */
 async function fetchReferenceMarkersForRoute(paddedRoute) {
   if (cacheRM.has(paddedRoute)) {
     return cacheRM.get(paddedRoute);
+  }
+
+  // Check persistent storage
+  try {
+    const idbStore = (await get(RM_CACHE_STORE_KEY)) || {};
+    if (idbStore[paddedRoute] && Array.isArray(idbStore[paddedRoute])) {
+      cacheRM.set(paddedRoute, idbStore[paddedRoute]);
+      return idbStore[paddedRoute];
+    }
+  } catch {
+    // Ignore idb errors and fallback to fetch
   }
 
   const params = new URLSearchParams({
@@ -66,6 +90,16 @@ async function fetchReferenceMarkersForRoute(paddedRoute) {
     const data = await res.json();
     const features = data.features || [];
     cacheRM.set(paddedRoute, features);
+
+    // Persist to IndexedDB
+    try {
+      const idbStore = (await get(RM_CACHE_STORE_KEY)) || {};
+      idbStore[paddedRoute] = features;
+      await set(RM_CACHE_STORE_KEY, idbStore);
+    } catch {
+      // Ignore idb save errors
+    }
+
     return features;
   } catch (err) {
     console.warn(`[txdotGisApi] Failed to fetch Reference Markers for ${paddedRoute}:`, err);
@@ -75,10 +109,22 @@ async function fetchReferenceMarkersForRoute(paddedRoute) {
 
 /**
  * Query measured roadway linework (with DFO measures) for a specific route ID (e.g. 'SH0225-RG').
+ * Persists in IndexedDB.
  */
 async function fetchRoadwayGeometryForRoute(routeId) {
   if (cacheRoadways.has(routeId)) {
     return cacheRoadways.get(routeId);
+  }
+
+  // Check persistent storage
+  try {
+    const idbStore = (await get(ROADWAYS_CACHE_STORE_KEY)) || {};
+    if (idbStore[routeId]) {
+      cacheRoadways.set(routeId, idbStore[routeId]);
+      return idbStore[routeId];
+    }
+  } catch {
+    // Ignore idb errors
   }
 
   const params = new URLSearchParams({
@@ -96,6 +142,18 @@ async function fetchRoadwayGeometryForRoute(routeId) {
     const data = await res.json();
     const feat = data.features?.[0] || null;
     cacheRoadways.set(routeId, feat);
+
+    // Persist to IndexedDB
+    if (feat) {
+      try {
+        const idbStore = (await get(ROADWAYS_CACHE_STORE_KEY)) || {};
+        idbStore[routeId] = feat;
+        await set(ROADWAYS_CACHE_STORE_KEY, idbStore);
+      } catch {
+        // Ignore idb save errors
+      }
+    }
+
     return feat;
   } catch (err) {
     console.warn(`[txdotGisApi] Failed to fetch Roadway geometry for ${routeId}:`, err);
@@ -343,8 +401,130 @@ async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, e
   };
 }
 
+// ── Persistent GPS Coordinates Cache ─────────────────────────────────────────
+
+export function getSectionGpsKey(highway, beginRef, endRef, county = '') {
+  const norm = normalizeTxDOTRoute(highway);
+  const route = norm ? norm.paddedRoute : String(highway || '').trim().toUpperCase();
+  const b = parseFloat(beginRef);
+  const e = parseFloat(endRef);
+  const bStr = !isNaN(b) ? b.toFixed(3) : String(beginRef ?? '').trim();
+  const eStr = !isNaN(e) ? e.toFixed(3) : String(endRef ?? '').trim();
+  const cStr = String(county || '').trim().toLowerCase();
+  return `${route}:${bStr}:${eStr}${cStr ? `:${cStr}` : ''}`;
+}
+
+/**
+ * Initialize persistent GPS coordinates cache from IndexedDB
+ */
+export async function initGpsCache() {
+  if (isGpsCacheHydrated) return memoryGpsCache;
+  try {
+    const stored = await get(GPS_CACHE_STORE_KEY);
+    if (stored && typeof stored === 'object') {
+      Object.entries(stored).forEach(([k, v]) => {
+        memoryGpsCache.set(k, v);
+      });
+    }
+    isGpsCacheHydrated = true;
+  } catch (err) {
+    console.warn('[txdotGisApi] Failed to load GPS cache from IndexedDB:', err);
+  }
+  return memoryGpsCache;
+}
+
+/**
+ * Save coordinates for a section into the persistent cache
+ */
+export async function saveCoordinatesToCache(section, coordinates) {
+  if (!section || !coordinates || coordinates.status !== 'success') return;
+  await initGpsCache();
+
+  const keyWithCounty = getSectionGpsKey(section.highway, section.beginRef, section.endRef, section.countyName);
+  const fallbackKey = getSectionGpsKey(section.highway, section.beginRef, section.endRef);
+
+  memoryGpsCache.set(keyWithCounty, coordinates);
+  memoryGpsCache.set(fallbackKey, coordinates);
+
+  try {
+    const existing = (await get(GPS_CACHE_STORE_KEY)) || {};
+    existing[keyWithCounty] = coordinates;
+    existing[fallbackKey] = coordinates;
+    await set(GPS_CACHE_STORE_KEY, existing);
+  } catch (err) {
+    console.warn('[txdotGisApi] Failed to save GPS to IndexedDB:', err);
+  }
+}
+
+/**
+ * Bulk persist an array of sections with coordinates into IndexedDB
+ */
+export async function batchSaveCoordinatesToCache(sectionsWithCoordinates) {
+  if (!Array.isArray(sectionsWithCoordinates) || sectionsWithCoordinates.length === 0) return;
+  await initGpsCache();
+
+  try {
+    const existing = (await get(GPS_CACHE_STORE_KEY)) || {};
+    sectionsWithCoordinates.forEach(s => {
+      if (s.coordinates?.status === 'success') {
+        const keyWithCounty = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName);
+        const fallbackKey = getSectionGpsKey(s.highway, s.beginRef, s.endRef);
+        memoryGpsCache.set(keyWithCounty, s.coordinates);
+        memoryGpsCache.set(fallbackKey, s.coordinates);
+        existing[keyWithCounty] = s.coordinates;
+        existing[fallbackKey] = s.coordinates;
+      }
+    });
+    await set(GPS_CACHE_STORE_KEY, existing);
+  } catch (err) {
+    console.warn('[txdotGisApi] Failed to batch save GPS to IndexedDB:', err);
+  }
+}
+
+/**
+ * Hydrates sections with coordinates from persistent cache if missing.
+ * Ensures previously generated GPS coordinates are automatically restored.
+ * 
+ * @param {Array<Object>} sections
+ * @returns {Promise<{ sections: Array<Object>, hasUpdates: boolean }>}
+ */
+export async function hydrateSectionsWithCachedCoordinates(sections) {
+  if (!Array.isArray(sections) || sections.length === 0) return { sections: [], hasUpdates: false };
+  await initGpsCache();
+
+  let hasUpdates = false;
+  const updated = sections.map(s => {
+    // If section already has valid coordinates, ensure they are cached
+    if (s.coordinates?.status === 'success' && (s.coordinates.R?.available || s.coordinates.L?.available)) {
+      const key = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName);
+      if (!memoryGpsCache.has(key)) {
+        memoryGpsCache.set(key, s.coordinates);
+      }
+      return s;
+    }
+
+    // Look up in persistent cache
+    const keyWithCounty = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName);
+    const fallbackKey = getSectionGpsKey(s.highway, s.beginRef, s.endRef);
+    const cached = memoryGpsCache.get(keyWithCounty) || memoryGpsCache.get(fallbackKey);
+
+    if (cached && cached.status === 'success') {
+      hasUpdates = true;
+      return {
+        ...s,
+        coordinates: cached,
+      };
+    }
+
+    return s;
+  });
+
+  return { sections: updated, hasUpdates };
+}
+
 /**
  * Resolves GPS coordinates for both R and L roadbeds for a single section object.
+ * Checks persistent cache before making any network calls.
  * 
  * @param {Object} section - Must have .highway, .beginRef, .endRef
  * @returns {Promise<Object>} coordinates object
@@ -352,6 +532,20 @@ async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, e
 export async function fetchCoordinatesForSection(section) {
   if (!section || !section.highway) {
     return { status: 'error', error: 'Missing highway information' };
+  }
+
+  // 0. If section already has valid coordinates, return directly
+  if (section.coordinates?.status === 'success' && (section.coordinates.R?.available || section.coordinates.L?.available)) {
+    return section.coordinates;
+  }
+
+  // 1. Check persistent cache
+  await initGpsCache();
+  const keyWithCounty = getSectionGpsKey(section.highway, section.beginRef, section.endRef, section.countyName);
+  const fallbackKey = getSectionGpsKey(section.highway, section.beginRef, section.endRef);
+  const cached = memoryGpsCache.get(keyWithCounty) || memoryGpsCache.get(fallbackKey);
+  if (cached && cached.status === 'success') {
+    return cached;
   }
 
   const parsed = normalizeTxDOTRoute(section.highway);
@@ -365,7 +559,7 @@ export async function fetchCoordinatesForSection(section) {
     return { status: 'error', error: `Invalid reference marker range: ${section.beginRef} – ${section.endRef}` };
   }
 
-  // 1. Fetch Reference Markers for this highway
+  // 2. Fetch Reference Markers for this highway
   const allMarkers = await fetchReferenceMarkersForRoute(parsed.paddedRoute);
   if (!allMarkers || allMarkers.length === 0) {
     return {
@@ -381,7 +575,6 @@ export async function fetchCoordinatesForSection(section) {
     const countyMatches = allMarkers.filter(f => 
       f.attributes.CNTY_NM && f.attributes.CNTY_NM.toLowerCase() === cleanCounty
     );
-    // If county matches contain both begin and end reference marker range, use them
     if (countyMatches.length > 0) {
       const minM = Math.min(...countyMatches.map(m => m.attributes.MRKR_NBR));
       const maxM = Math.max(...countyMatches.map(m => m.attributes.MRKR_NBR));
@@ -391,26 +584,34 @@ export async function fetchCoordinatesForSection(section) {
     }
   }
 
-  // 2. Resolve Roadbed R
+  // 3. Resolve Roadbed R
   const rResult = await resolveRoadbedCoordinates(parsed.paddedRoute, 'R', beginRef, endRef, filteredMarkers);
 
-  // 3. Resolve Roadbed L
+  // 4. Resolve Roadbed L
   const lResult = await resolveRoadbedCoordinates(parsed.paddedRoute, 'L', beginRef, endRef, filteredMarkers);
 
   const hasAny = rResult.available || lResult.available;
 
-  return {
+  const result = {
     status: hasAny ? 'success' : 'failed',
     timestamp: new Date().toISOString(),
     highwayRoute: parsed.paddedRoute,
     R: rResult,
     L: lResult,
   };
+
+  // 5. Persist to cache if successful
+  if (result.status === 'success') {
+    await saveCoordinatesToCache(section, result);
+  }
+
+  return result;
 }
 
 /**
  * Batch generates coordinates for a list of sections.
- * Optimized by grouping sections by highway to avoid redundant network calls.
+ * Optimized by grouping sections by highway to avoid redundant network calls,
+ * and automatically persists all coordinates to IndexedDB.
  * 
  * @param {Array<Object>} sections
  * @param {Function} [onProgress] - callback: ({ current, total, highway, sectionId }) => void
@@ -451,6 +652,9 @@ export async function batchGenerateCoordinates(sections, onProgress = null) {
       });
     }
   }
+
+  // Save all to persistent storage
+  await batchSaveCoordinatesToCache(results);
 
   return results;
 }
