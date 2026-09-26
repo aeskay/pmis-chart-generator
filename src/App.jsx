@@ -590,6 +590,33 @@ export default function App() {
     addToast('success', 'Section updated', updatedSection.id);
   }, [mutate, selectedProjectId, addToast, currentUser]);
 
+  const handleBatchUpdateSections = useCallback((updatedSectionsList) => {
+    if (!selectedProjectId || !Array.isArray(updatedSectionsList) || updatedSectionsList.length === 0) return;
+    const updateMap = new Map(updatedSectionsList.map(s => [s._uuid || s.id, s]));
+    mutate(prev => {
+      const nextProjects = prev.projects.map(p => {
+        if (p.id !== selectedProjectId) return p;
+        return {
+          ...p,
+          sections: p.sections.map(s => {
+            const key = s._uuid || s.id;
+            return updateMap.has(key) ? updateMap.get(key) : s;
+          }),
+        };
+      });
+      if (currentUser) {
+        const updatedProj = nextProjects.find(p => p.id === selectedProjectId);
+        if (updatedProj) {
+          setCloudSyncStatus('saving');
+          saveUserProject(currentUser.uid, updatedProj)
+            .then(() => setCloudSyncStatus('synced'))
+            .catch(() => setCloudSyncStatus('error'));
+        }
+      }
+      return { ...prev, projects: nextProjects };
+    });
+  }, [mutate, selectedProjectId, currentUser]);
+
   const handleSelectSection = useCallback((id) => {
     setSelectedSectionId(id);
     setActiveTab('condition');
@@ -742,6 +769,7 @@ export default function App() {
                 selectedSectionId={selectedSectionId}
                 onSelectSection={(id) => { handleSelectSection(id); setActiveTab('condition'); }}
                 onUpdateSection={handleUpdateSection}
+                onBatchUpdateSections={handleBatchUpdateSections}
                 onDeleteSection={handleDeleteSection}
                 onBulkDeleteSections={handleBulkDeleteSections}
                 pmisMap={pmisMap}

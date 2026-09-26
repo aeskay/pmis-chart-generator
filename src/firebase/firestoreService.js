@@ -42,6 +42,7 @@ function sanitizeProject(project) {
           base:            s.base || null,
           baseTh:          s.baseTh ?? null,
           sub:             s.sub || null,
+          coordinates:     s.coordinates || null,
           columnMappings:  s.columnMappings || {},
           extraColumns:    s.extraColumns || {},
         }))

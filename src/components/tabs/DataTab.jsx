@@ -13,12 +13,16 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { exportSectionToExcel } from '../../utils/excelExporter';
+import CoordinateModal from '../modals/CoordinateModal';
+import BatchGpsModal from '../modals/BatchGpsModal';
+import { fetchCoordinatesForSection } from '../../utils/txdotGisApi';
 
 const COLUMNS = [
   { key: 'id',              label: 'ID',              mono: true,  numeric: false },
   { key: 'sn',              label: 'S/N',             mono: true,  numeric: false },
   { key: 'csj',             label: 'CSJ',             mono: true,  numeric: false },
   { key: 'highway',         label: 'Highway',         mono: true,  numeric: false },
+  { key: 'coordinates',     label: 'TxDOT GPS (R & L)', mono: true,  numeric: false, isCustomCell: true },
   { key: 'district',        label: 'District',        mono: false, numeric: false },
   { key: 'beginRef',        label: 'Begin Ref',       mono: true,  numeric: true, fmt: v => (typeof v === 'number' ? v.toFixed(3) : v) },
   { key: 'endRef',          label: 'End Ref',         mono: true,  numeric: true, fmt: v => (typeof v === 'number' ? v.toFixed(3) : v) },
@@ -37,6 +41,7 @@ export default function DataTab({
   selectedSectionId,
   onSelectSection,
   onUpdateSection,
+  onBatchUpdateSections,
   onDeleteSection,
   onBulkDeleteSections,
   pmisMap,
@@ -63,6 +68,55 @@ export default function DataTab({
   // Items: { sectionId, key, oldValue, newValue, label }
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
+
+  // ── GIS Coordinate Modals & States ─────────────────────────────────────────
+  const [coordinateModalSection, setCoordinateModalSection] = useState(null);
+  const [isBatchGpsOpen, setIsBatchGpsOpen] = useState(false);
+  const [batchSectionsQueue, setBatchSectionsQueue] = useState([]);
+  const [fetchingSingleId, setFetchingSingleId] = useState(null);
+
+  const handleOpenBatchGps = () => {
+    let targetList = sections;
+    if (selectedIds.size > 0) {
+      targetList = sections.filter(s => selectedIds.has(s.id));
+    }
+    if (targetList.length === 0) {
+      if (addToast) addToast('warning', 'No Sections', 'No sections available to generate coordinates.');
+      return;
+    }
+    setBatchSectionsQueue(targetList);
+    setIsBatchGpsOpen(true);
+  };
+
+  const handleBatchGpsComplete = (updatedSections) => {
+    if (onBatchUpdateSections) {
+      onBatchUpdateSections(updatedSections);
+    } else if (onUpdateSection) {
+      updatedSections.forEach(s => onUpdateSection(s));
+    }
+  };
+
+  const handleQuickFetchSingle = async (section, e) => {
+    e?.stopPropagation();
+    if (!section || fetchingSingleId === section.id) return;
+    setFetchingSingleId(section.id);
+    try {
+      const coords = await fetchCoordinatesForSection(section);
+      const updated = { ...section, coordinates: coords };
+      if (onUpdateSection) onUpdateSection(updated);
+      if (addToast) {
+        if (coords.status === 'success') {
+          addToast('success', 'GPS Coordinates Generated', `${section.highway} (Roadbeds R & L)`);
+        } else {
+          addToast('warning', 'TxDOT LRS Notice', coords.error || 'Partial coordinates generated');
+        }
+      }
+    } catch (err) {
+      if (addToast) addToast('error', 'GPS Fetch Failed', err.message);
+    } finally {
+      setFetchingSingleId(null);
+    }
+  };
 
   // Auto-focus inline input when editing starts
   useEffect(() => {
@@ -490,6 +544,26 @@ export default function DataTab({
             </button>
           )}
 
+          {/* TxDOT GPS Batch Generation Button */}
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            onClick={handleOpenBatchGps}
+            title="Fetch official TxDOT GPS coordinates for Roadbeds R & L via ArcGIS LRS API"
+            style={{
+              gap: 5,
+              fontSize: '12px',
+              padding: '4px 10px',
+              borderColor: 'var(--accent-primary)',
+              color: 'var(--accent-primary)',
+              background: 'rgba(59, 130, 246, 0.08)',
+              fontWeight: 600,
+            }}
+          >
+            <span>🌐</span>
+            <span>{selectedIds.size > 0 ? `Generate GPS (${selectedIds.size})` : `Generate GPS (${sections.length})`}</span>
+          </button>
+
           {/* Project Export Modal Trigger */}
           {onOpenProjectExport && (
             <button
@@ -650,6 +724,20 @@ export default function DataTab({
                         📥
                       </button>
 
+                      {/* View / Fetch GPS Coordinates */}
+                      <button
+                        type="button"
+                        className="row-action-btn"
+                        onClick={() => setCoordinateModalSection(section)}
+                        title={section.coordinates?.status === 'success' ? 'View TxDOT GPS Coordinates (L & R)' : 'Fetch TxDOT GPS Coordinates'}
+                        style={{
+                          color: section.coordinates?.status === 'success' ? '#22c55e' : 'inherit',
+                          fontWeight: section.coordinates?.status === 'success' ? 700 : 400,
+                        }}
+                      >
+                        📍
+                      </button>
+
                       {/* Delete Section */}
                       <button
                         type="button"
@@ -664,6 +752,87 @@ export default function DataTab({
 
                   {/* Standard Column Cells */}
                   {COLUMNS.map(col => {
+                    if (col.key === 'coordinates') {
+                      const c = section.coordinates;
+                      const hasCoords = c?.status === 'success';
+                      const isFetchingThis = fetchingSingleId === section.id;
+
+                      if (hasCoords) {
+                        const rBegin = c.R?.begin ? `${c.R.begin[0].toFixed(4)}, ${c.R.begin[1].toFixed(4)}` : null;
+                        const lBegin = c.L?.begin ? `${c.L.begin[0].toFixed(4)}, ${c.L.begin[1].toFixed(4)}` : null;
+
+                        return (
+                          <td
+                            key={col.key}
+                            style={{ padding: '3px 6px', whiteSpace: 'nowrap' }}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setCoordinateModalSection(section)}
+                              title="Click to view full coordinates, Google Maps, and roadway segment"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                background: 'rgba(34, 197, 94, 0.08)',
+                                border: '1px solid rgba(34, 197, 94, 0.3)',
+                                color: 'var(--text-primary)',
+                                padding: '2px 8px',
+                                borderRadius: 12,
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                                fontFamily: 'monospace',
+                              }}
+                            >
+                              <span style={{ color: '#22c55e', fontSize: '9px' }}>●</span>
+                              <span>R: {rBegin || '—'}</span>
+                              <span style={{ color: 'var(--border-subtle)' }}>|</span>
+                              <span>L: {lBegin || '—'}</span>
+                            </button>
+                          </td>
+                        );
+                      }
+
+                      return (
+                        <td
+                          key={col.key}
+                          style={{ padding: '3px 6px', whiteSpace: 'nowrap' }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            disabled={isFetchingThis}
+                            onClick={(e) => handleQuickFetchSingle(section, e)}
+                            title="Fetch official TxDOT GPS coordinates for this section"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              background: 'var(--bg-elevated)',
+                              border: '1px dashed var(--border-default)',
+                              color: 'var(--text-secondary)',
+                              padding: '2px 8px',
+                              borderRadius: 4,
+                              fontSize: '11px',
+                              cursor: isFetchingThis ? 'wait' : 'pointer',
+                            }}
+                          >
+                            {isFetchingThis ? (
+                              <>
+                                <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} />
+                                <span>Fetching...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>📍</span>
+                                <span>+ Fetch GPS</span>
+                              </>
+                            )}
+                          </button>
+                        </td>
+                      );
+                    }
                     const isEditing = editingCell?.sectionId === section.id && editingCell?.key === col.key;
                     const raw = section[col.key];
                     const displayVal = col.fmt ? col.fmt(raw) : raw;
@@ -756,6 +925,30 @@ export default function DataTab({
           </tbody>
         </table>
       </div>
+
+      {/* ── Modals ────────────────────────────────────────────────────────── */}
+      {coordinateModalSection && (
+        <CoordinateModal
+          isOpen={Boolean(coordinateModalSection)}
+          section={coordinateModalSection}
+          onClose={() => setCoordinateModalSection(null)}
+          onUpdateSection={(updated) => {
+            if (onUpdateSection) onUpdateSection(updated);
+            setCoordinateModalSection(updated);
+          }}
+          addToast={addToast}
+        />
+      )}
+
+      {isBatchGpsOpen && (
+        <BatchGpsModal
+          isOpen={isBatchGpsOpen}
+          sections={batchSectionsQueue}
+          onClose={() => setIsBatchGpsOpen(false)}
+          onComplete={handleBatchGpsComplete}
+          addToast={addToast}
+        />
+      )}
     </div>
   );
 }

@@ -87,6 +87,13 @@ export function buildSectionSheetAoa(section, pmisMap) {
     `S/N: ${section.sn ?? '—'}`,
   ];
 
+  const rStart = section.coordinates?.R?.begin ? `${section.coordinates.R.begin[0].toFixed(5)}, ${section.coordinates.R.begin[1].toFixed(5)}` : null;
+  const lStart = section.coordinates?.L?.begin ? `${section.coordinates.L.begin[0].toFixed(5)}, ${section.coordinates.L.begin[1].toFixed(5)}` : null;
+  if (rStart || lStart) {
+    row1.push(`GPS (R): ${rStart ?? '—'}`);
+    row1.push(`GPS (L): ${lStart ?? '—'}`);
+  }
+
   // Row 2: Table headers
   const row2 = [
     'Year',
