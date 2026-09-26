@@ -283,7 +283,7 @@ export default function DistributionTab({
         text: textVals,
         textposition: 'outside',
         cliponaxis: false,
-        textfont: { size: 14, color: '#000', family: 'Inter, sans-serif' },
+        textfont: { size: 16, color: '#000', family: 'Inter, sans-serif' },
         marker: {
           color: colors,
           line: { color: '#000000', width: 1.2 },
@@ -305,15 +305,15 @@ export default function DistributionTab({
       template: 'plotly_white',
       paper_bgcolor: '#ffffff',
       plot_bgcolor: '#ffffff',
-      margin: { t: 45, b: 75, l: 65, r: 25 },
-      height: 380,
+      margin: { t: 50, b: 85, l: 80, r: 25 },
+      height: 410,
       showlegend: false,
       xaxis: {
         title: {
           text: '<b>PMIS Category</b>',
-          font: { size: 16, color: '#000' },
+          font: { size: 18, color: '#000' },
         },
-        tickfont: { size: 14, color: '#000', family: 'Inter, sans-serif' },
+        tickfont: { size: 16, color: '#000', family: 'Inter, sans-serif' },
         showline: true,
         linewidth: 2,
         linecolor: '#000',
@@ -323,10 +323,10 @@ export default function DistributionTab({
       yaxis: {
         title: {
           text: viewMode === 'count' ? '<b>Number of Sections</b>' : '<b>Percentage of Sections (%)</b>',
-          font: { size: 16, color: '#000' },
+          font: { size: 18, color: '#000' },
         },
         range: [0, upperLimit],
-        tickfont: { size: 13, color: '#000' },
+        tickfont: { size: 15, color: '#000' },
         showline: true,
         linewidth: 2,
         linecolor: '#000',
