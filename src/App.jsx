@@ -14,6 +14,7 @@ import ConditionTab from './components/tabs/ConditionTab';
 import DistressTab from './components/tabs/DistressTab';
 import DistributionTab from './components/tabs/DistributionTab';
 import DataTab from './components/tabs/DataTab';
+import MapTab from './components/tabs/MapTab';
 import ToastContainer from './components/ToastContainer';
 import NewProjectModal from './components/modals/NewProjectModal';
 import OpenProjectsModal from './components/modals/OpenProjectsModal';
@@ -43,6 +44,7 @@ const TABS = [
   { id: 'distress',     label: 'Distress',     icon: '📊' },
   { id: 'distribution', label: 'Distribution', icon: '📉' },
   { id: 'data',         label: 'Data',         icon: '📋' },
+  { id: 'map',          label: 'Map',          icon: '🗺️' },
 ];
 
 const SAVE_DEBOUNCE_MS = 800;
@@ -775,6 +777,18 @@ export default function App() {
                 pmisMap={pmisMap}
                 projectName={selectedProject?.name}
                 onOpenProjectExport={() => setShowExportProjectModal(true)}
+                addToast={addToast}
+              />
+            )}
+            {activeTab === 'map' && (
+              <MapTab
+                project={selectedProject}
+                sections={projectSections}
+                selectedSectionId={selectedSectionId}
+                onSelectSection={(id) => setSelectedSectionId(id)}
+                onUpdateSection={handleUpdateSection}
+                onBatchUpdateSections={handleBatchUpdateSections}
+                pmisMap={pmisMap}
                 addToast={addToast}
               />
             )}
