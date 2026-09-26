@@ -6,6 +6,7 @@
 
 import React, { useState } from 'react';
 import { formatGpsDisplay, getGoogleMapsUrl, fetchCoordinatesForSection } from '../../utils/txdotGisApi';
+import { downloadSingleSectionKml } from '../../utils/gisExporter';
 
 export default function CoordinateModal({
   section,
@@ -324,14 +325,31 @@ export default function CoordinateModal({
             <span>{isRefreshing ? 'Querying TxDOT API...' : 'Fetch / Refresh from TxDOT'}</span>
           </button>
 
-          <button
-            type="button"
-            className="btn btn--primary btn--sm"
-            onClick={onClose}
-            style={{ padding: '6px 18px', fontSize: 13 }}
-          >
-            Done
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(rData?.available || lData?.available) && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => {
+                  downloadSingleSectionKml(section);
+                  if (addToast) addToast('success', 'KML Downloaded', `Saved Google Earth KML for Section ${section.id}`);
+                }}
+                style={{ gap: 5, fontSize: 12, padding: '6px 12px' }}
+                title="Download Google Earth KML for this section"
+              >
+                <span>📥</span>
+                <span>Download .kml</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={onClose}
+              style={{ padding: '6px 18px', fontSize: 13 }}
+            >
+              Done
+            </button>
+          </div>
         </div>
       </div>
     </div>

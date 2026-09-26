@@ -161,7 +161,7 @@ export default function DistributionTab({
       const summaryAoa = [
         ['TxDOT PMIS Score Distribution Summary'],
         [`Project: ${project?.name || 'All Sections'}`],
-        [`Slab Thickness Filter: ${slabThFilter === 'all' ? 'All' : slabThFilter + '"'}`],
+        [`Slab Thickness Filter: ${availableSlabThicknesses.length === 0 ? 'N/A (Not Available)' : (slabThFilter === 'all' ? 'All' : slabThFilter + '"')}`],
         [`Roadbed Filter: ${roadbedFilter}`],
         [`Evaluated Roadbed-Sections: ${distData.totalUnits}`],
         [`Latest PMIS Year Span: ${distData.minYear === distData.maxYear ? distData.minYear : `${distData.minYear}–${distData.maxYear}`}`],
@@ -403,29 +403,39 @@ export default function DistributionTab({
             <select
               value={slabThFilter}
               onChange={(e) => setSlabThFilter(e.target.value)}
+              disabled={availableSlabThicknesses.length === 0}
+              title={availableSlabThicknesses.length === 0 ? 'Slab thickness is not available in project data' : undefined}
               style={{
-                background: 'var(--bg-elevated)',
-                color: 'var(--text-primary)',
+                background: availableSlabThicknesses.length === 0 ? 'var(--bg-card)' : 'var(--bg-elevated)',
+                color: availableSlabThicknesses.length === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
                 border: '1px solid var(--border-default)',
                 borderRadius: 'var(--radius-sm)',
                 padding: '4px 8px',
                 fontSize: '12px',
+                opacity: availableSlabThicknesses.length === 0 ? 0.6 : 1,
+                cursor: availableSlabThicknesses.length === 0 ? 'not-allowed' : 'pointer',
               }}
             >
-              <option value="all">All Thicknesses ({sections.length} sec)</option>
-              {availableSlabThicknesses.map(th => {
-                const count = (sections || []).filter(s => {
-                  const raw = s.slabTh ?? s.oldSlabTh;
-                  const num = parseFloat(raw);
-                  if (!isNaN(num) && typeof th === 'number') return Math.abs(num - th) < 0.01;
-                  return String(raw).trim().toLowerCase() === String(th).trim().toLowerCase();
-                }).length;
-                return (
-                  <option key={th} value={th}>
-                    {th}" ({count} {count === 1 ? 'sec' : 'secs'})
-                  </option>
-                );
-              })}
+              {availableSlabThicknesses.length === 0 ? (
+                <option value="all">Not Available</option>
+              ) : (
+                <>
+                  <option value="all">All Thicknesses ({sections.length} sec)</option>
+                  {availableSlabThicknesses.map(th => {
+                    const count = (sections || []).filter(s => {
+                      const raw = s.slabTh ?? s.oldSlabTh;
+                      const num = parseFloat(raw);
+                      if (!isNaN(num) && typeof th === 'number') return Math.abs(num - th) < 0.01;
+                      return String(raw).trim().toLowerCase() === String(th).trim().toLowerCase();
+                    }).length;
+                    return (
+                      <option key={th} value={th}>
+                        {th}" ({count} {count === 1 ? 'sec' : 'secs'})
+                      </option>
+                    );
+                  })}
+                </>
+              )}
             </select>
           </div>
 

@@ -628,29 +628,39 @@ export default function DistressTab({
             <select
               value={slabThFilter}
               onChange={(e) => setSlabThFilter(e.target.value)}
+              disabled={availableSlabThicknesses.length === 0}
+              title={availableSlabThicknesses.length === 0 ? 'Slab thickness is not available in project data' : undefined}
               style={{
-                background: 'var(--bg-elevated)',
-                color: 'var(--text-primary)',
+                background: availableSlabThicknesses.length === 0 ? 'var(--bg-card)' : 'var(--bg-elevated)',
+                color: availableSlabThicknesses.length === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
                 border: '1px solid var(--border-default)',
                 borderRadius: 'var(--radius-sm)',
                 padding: '4px 8px',
                 fontSize: '12px',
+                opacity: availableSlabThicknesses.length === 0 ? 0.6 : 1,
+                cursor: availableSlabThicknesses.length === 0 ? 'not-allowed' : 'pointer',
               }}
             >
-              <option value="all">All Thicknesses ({sections.length} sec)</option>
-              {availableSlabThicknesses.map(th => {
-                const count = (sections || []).filter(s => {
-                  const raw = s.slabTh ?? s.oldSlabTh;
-                  const num = parseFloat(raw);
-                  if (!isNaN(num) && typeof th === 'number') return Math.abs(num - th) < 0.01;
-                  return String(raw).trim().toLowerCase() === String(th).trim().toLowerCase();
-                }).length;
-                return (
-                  <option key={th} value={th}>
-                    {th}" ({count} {count === 1 ? 'sec' : 'secs'})
-                  </option>
-                );
-              })}
+              {availableSlabThicknesses.length === 0 ? (
+                <option value="all">Not Available</option>
+              ) : (
+                <>
+                  <option value="all">All Thicknesses ({sections.length} sec)</option>
+                  {availableSlabThicknesses.map(th => {
+                    const count = (sections || []).filter(s => {
+                      const raw = s.slabTh ?? s.oldSlabTh;
+                      const num = parseFloat(raw);
+                      if (!isNaN(num) && typeof th === 'number') return Math.abs(num - th) < 0.01;
+                      return String(raw).trim().toLowerCase() === String(th).trim().toLowerCase();
+                    }).length;
+                    return (
+                      <option key={th} value={th}>
+                        {th}" ({count} {count === 1 ? 'sec' : 'secs'})
+                      </option>
+                    );
+                  })}
+                </>
+              )}
             </select>
           </div>
 
@@ -849,8 +859,12 @@ export default function DistressTab({
 
           <InfoMetric
             label="Slab Thickness"
-            value={slabThFilter === 'all' ? 'All' : `${slabThFilter}"`}
-            sub={slabThFilter === 'all' ? `${availableSlabThicknesses.length} distinct sizes` : `${stats.totalTracked} filtered sections`}
+            value={availableSlabThicknesses.length === 0 ? 'N/A' : (slabThFilter === 'all' ? 'All' : `${slabThFilter}"`)}
+            sub={
+              availableSlabThicknesses.length === 0
+                ? 'Not available'
+                : (slabThFilter === 'all' ? `${availableSlabThicknesses.length} distinct sizes` : `${stats.totalTracked} filtered sections`)
+            }
             accent="var(--accent-primary)"
           />
           <InfoMetric

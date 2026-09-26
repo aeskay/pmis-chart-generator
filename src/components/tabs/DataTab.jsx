@@ -15,6 +15,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { exportSectionToExcel } from '../../utils/excelExporter';
 import CoordinateModal from '../modals/CoordinateModal';
 import BatchGpsModal from '../modals/BatchGpsModal';
+import GisExportModal from '../modals/GisExportModal';
 import { fetchCoordinatesForSection } from '../../utils/txdotGisApi';
 
 const COLUMNS = [
@@ -74,6 +75,7 @@ export default function DataTab({
   const [isBatchGpsOpen, setIsBatchGpsOpen] = useState(false);
   const [batchSectionsQueue, setBatchSectionsQueue] = useState([]);
   const [fetchingSingleId, setFetchingSingleId] = useState(null);
+  const [isGisExportOpen, setIsGisExportOpen] = useState(false);
 
   const handleOpenBatchGps = () => {
     let targetList = sections;
@@ -564,6 +566,23 @@ export default function DataTab({
             <span>{selectedIds.size > 0 ? `Generate GPS (${selectedIds.size})` : `Generate GPS (${sections.length})`}</span>
           </button>
 
+          {/* GIS Export Modal Trigger */}
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            onClick={() => setIsGisExportOpen(true)}
+            title="Export sections to Google Earth (.kml) or GeoJSON"
+            style={{
+              gap: 5,
+              fontSize: '12px',
+              padding: '4px 10px',
+              fontWeight: 600,
+            }}
+          >
+            <span>🌍</span>
+            <span>Export GIS / KML</span>
+          </button>
+
           {/* Project Export Modal Trigger */}
           {onOpenProjectExport && (
             <button
@@ -946,6 +965,16 @@ export default function DataTab({
           sections={batchSectionsQueue}
           onClose={() => setIsBatchGpsOpen(false)}
           onComplete={handleBatchGpsComplete}
+          addToast={addToast}
+        />
+      )}
+
+      {isGisExportOpen && (
+        <GisExportModal
+          isOpen={isGisExportOpen}
+          sections={sections}
+          projectName={projectName || 'PMIS_Project'}
+          onClose={() => setIsGisExportOpen(false)}
           addToast={addToast}
         />
       )}

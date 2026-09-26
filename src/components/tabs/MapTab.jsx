@@ -26,6 +26,8 @@ import { buildEvalData, parseHighwayComponents } from '../../utils/chartBuilder'
 import { formatGpsDisplay, fetchCoordinatesForSection } from '../../utils/txdotGisApi';
 import CoordinateModal from '../modals/CoordinateModal';
 import BatchGpsModal from '../modals/BatchGpsModal';
+import GisExportModal from '../modals/GisExportModal';
+import { downloadSingleSectionKml } from '../../utils/gisExporter';
 
 const CARTO_KEY = import.meta.env.VITE_CARTO_API_KEY || 'cb1_3x0o_1_0e98f5ff4c4adb42019dcfeb';
 const cartoKeyParam = CARTO_KEY ? `?key=${CARTO_KEY}` : '';
@@ -97,6 +99,7 @@ export default function MapTab({
   const [inspectSection, setInspectSection] = useState(null);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [batchSectionsQueue, setBatchSectionsQueue] = useState([]);
+  const [isGisExportOpen, setIsGisExportOpen] = useState(false);
 
   // DOM Refs
   const mapContainerRef = useRef(null);
@@ -158,6 +161,21 @@ export default function MapTab({
     });
     return { mappedSections: mapped, unmappedSections: unmapped };
   }, [sections]);
+
+  // Check if any section has valid slab thickness data
+  const hasSlabThickness = useMemo(() => {
+    return (sections || []).some(s => {
+      const val = s.slabTh ?? s.oldSlabTh;
+      return val !== null && val !== undefined && String(val).trim() !== '' && !isNaN(parseFloat(val));
+    });
+  }, [sections]);
+
+  // Fallback colorMetric if slab is selected but not available
+  useEffect(() => {
+    if (colorMetric === 'slab' && !hasSlabThickness) {
+      setColorMetric('condition');
+    }
+  }, [colorMetric, hasSlabThickness]);
 
   // ── Filtered Sections for Sidebar ──────────────────────────────────────────
   const sidebarSections = useMemo(() => {
@@ -272,7 +290,9 @@ export default function MapTab({
     }
 
     if (colorMetric === 'slab') {
-      const th = parseFloat(section.slabTh);
+      const raw = section.slabTh ?? section.oldSlabTh;
+      if (raw === undefined || raw === null || String(raw).trim() === '') return '#64748b';
+      const th = parseFloat(raw);
       if (isNaN(th)) return '#64748b';
       if (th >= 12) return '#8b5cf6';
       if (th >= 10) return '#3b82f6';
@@ -410,8 +430,16 @@ export default function MapTab({
               <button
                 id="btn-popup-coords-${section.id}"
                 style="padding: 6px 10px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;"
+                title="View coordinates & details"
               >
                 📍 GPS
+              </button>
+              <button
+                id="btn-popup-kml-${section.id}"
+                style="padding: 6px 10px; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;"
+                title="Download Google Earth KML for this section"
+              >
+                📥 KML
               </button>
             </div>
           </div>
@@ -431,6 +459,13 @@ export default function MapTab({
             if (btnCoords) {
               btnCoords.onclick = () => {
                 setInspectSection(section);
+              };
+            }
+            const btnKml = document.getElementById(`btn-popup-kml-${section.id}`);
+            if (btnKml) {
+              btnKml.onclick = () => {
+                downloadSingleSectionKml(section);
+                if (addToast) addToast('success', 'KML Downloaded', `Saved Google Earth KML for Section ${section.id}`);
               };
             }
           }, 50);
@@ -593,7 +628,13 @@ export default function MapTab({
               <option value="distress">Distress Score</option>
               <option value="ride">Ride Score</option>
               <option value="roadbed">Roadbed (R vs L)</option>
-              <option value="slab">Slab Thickness</option>
+              <option
+                value="slab"
+                disabled={!hasSlabThickness}
+                style={!hasSlabThickness ? { opacity: 0.5, color: '#888' } : {}}
+              >
+                Slab Thickness {!hasSlabThickness ? '(Not Available)' : ''}
+              </option>
             </select>
           </div>
 
@@ -658,6 +699,26 @@ export default function MapTab({
           >
             <span>🎯</span>
             <span>Fit All</span>
+          </button>
+
+          {/* GIS Export Button */}
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            onClick={() => setIsGisExportOpen(true)}
+            title="Export sections to Google Earth (.kml) or GeoJSON"
+            style={{
+              gap: 5,
+              fontSize: 12,
+              padding: '5px 11px',
+              background: 'rgba(59, 130, 246, 0.08)',
+              borderColor: 'rgba(59, 130, 246, 0.4)',
+              color: 'var(--text-primary)',
+              fontWeight: 600,
+            }}
+          >
+            <span>🌍</span>
+            <span>GIS Export</span>
           </button>
 
           {/* Generate Missing GPS */}
@@ -815,18 +876,35 @@ export default function MapTab({
                           )}
                         </div>
 
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--xs"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setInspectSection(s);
-                          }}
-                          title="View / Fetch GPS details"
-                          style={{ padding: '2px 6px', fontSize: 11 }}
-                        >
-                          📍 GPS
-                        </button>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {hasGps && (
+                            <button
+                              type="button"
+                              className="btn btn--ghost btn--xs"
+                              onClick={e => {
+                                e.stopPropagation();
+                                downloadSingleSectionKml(s);
+                                if (addToast) addToast('success', 'KML Downloaded', `Saved Google Earth KML for Section ${s.id}`);
+                              }}
+                              title="Download Google Earth KML"
+                              style={{ padding: '2px 5px', fontSize: 11 }}
+                            >
+                              📥 KML
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--xs"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setInspectSection(s);
+                            }}
+                            title="View / Fetch GPS details"
+                            style={{ padding: '2px 6px', fontSize: 11 }}
+                          >
+                            📍 GPS
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -914,6 +992,23 @@ export default function MapTab({
                   </div>
                 )}
 
+                {/* Slab Thickness Mode */}
+                {colorMetric === 'slab' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {[
+                      { label: '≥ 12"', color: '#8b5cf6' },
+                      { label: '10" – 11.9"', color: '#3b82f6' },
+                      { label: '8" – 9.9"', color: '#10b981' },
+                      { label: '< 8"', color: '#f59e0b' },
+                    ].map(item => (
+                      <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ width: 14, height: 4, borderRadius: 2, background: item.color }} />
+                        <span>{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Roadbed indicator line */}
                 <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: 10, color: '#94a3b8' }}>
                   🟢 Start Point • 🔴 End Point
@@ -944,6 +1039,16 @@ export default function MapTab({
           sections={batchSectionsQueue}
           onClose={() => setIsBatchModalOpen(false)}
           onComplete={handleBatchComplete}
+          addToast={addToast}
+        />
+      )}
+
+      {isGisExportOpen && (
+        <GisExportModal
+          isOpen={isGisExportOpen}
+          sections={sections}
+          projectName={project?.name || 'PMIS_Project'}
+          onClose={() => setIsGisExportOpen(false)}
           addToast={addToast}
         />
       )}

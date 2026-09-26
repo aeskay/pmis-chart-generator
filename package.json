@@ -13,6 +13,7 @@
   "dependencies": {
     "firebase": "^12.19.0",
     "idb-keyval": "^6.3.0",
+    "jszip": "^3.10.2",
     "leaflet": "^1.9.4",
     "papaparse": "^5.4.1",
     "plotly.js-dist-min": "^2.35.2",
