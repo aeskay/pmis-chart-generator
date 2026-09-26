@@ -9,7 +9,8 @@
 
 import React, { useMemo, useState, useRef } from 'react';
 import PlotlyChart from '../PlotlyChart';
-import { buildAggregateDistressData, niceTickStep } from '../../utils/chartBuilder';
+import SectionFilterModal from '../modals/SectionFilterModal';
+import { buildAggregateDistressData, buildDistressData, niceTickStep } from '../../utils/chartBuilder';
 import { exportAggregateDistressToExcel } from '../../utils/excelExporter';
 
 
@@ -53,6 +54,69 @@ export default function DistressTab({
   const [slabThFilter, setSlabThFilter] = useState('all'); // 'all' | specific slab thickness (e.g., '10', '12', etc.)
   const [copyingChart, setCopyingChart] = useState(false);
 
+  // ── Section Inclusion / Exclusion state ──────────────────────────────────────
+  const [excludedSectionIds, setExcludedSectionIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem('pmis_distress_excluded_sections');
+      if (saved) return new Set(JSON.parse(saved));
+    } catch (e) {
+      console.warn('Could not read excluded sections', e);
+    }
+    return new Set();
+  });
+  const [showSectionFilterModal, setShowSectionFilterModal] = useState(false);
+  const [sectionFilterSearch, setSectionFilterSearch] = useState('');
+  const [sectionSortBy, setSectionSortBy] = useState('distress_desc'); // 'distress_desc' | 'id_asc' | 'highway_asc'
+
+  const toggleSectionExclusion = (id) => {
+    setExcludedSectionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      try {
+        localStorage.setItem('pmis_distress_excluded_sections', JSON.stringify(Array.from(next)));
+      } catch (e) {
+        console.warn('Could not persist excluded sections', e);
+      }
+      return next;
+    });
+  };
+
+  const includeAllSections = () => {
+    setExcludedSectionIds(new Set());
+    try {
+      localStorage.setItem('pmis_distress_excluded_sections', JSON.stringify([]));
+    } catch (e) {}
+  };
+
+  const excludeAllSections = () => {
+    const allIds = (sections || []).map(s => s.id);
+    setExcludedSectionIds(new Set(allIds));
+    try {
+      localStorage.setItem('pmis_distress_excluded_sections', JSON.stringify(allIds));
+    } catch (e) {}
+  };
+
+  const invertSectionSelection = () => {
+    setExcludedSectionIds(prev => {
+      const next = new Set();
+      for (const s of (sections || [])) {
+        if (!prev.has(s.id)) {
+          next.add(s.id);
+        }
+      }
+      try {
+        localStorage.setItem('pmis_distress_excluded_sections', JSON.stringify(Array.from(next)));
+      } catch (e) {
+        console.warn('Could not persist excluded sections', e);
+      }
+      return next;
+    });
+  };
+
   // ── Persistent Primary Y-Axis controls (min, max, interval) ─────────────────
   const [yAxisConfig, setYAxisConfig] = useState(() => {
     try {
@@ -84,6 +148,31 @@ export default function DistressTab({
     });
   };
 
+  // Calculate individual section peak distress stats for sorting & inspecting
+  const sectionSummaryMap = useMemo(() => {
+    if (!pmisMap || !sections || !sections.length) return new Map();
+    const map = new Map();
+    for (const s of sections) {
+      const dist = buildDistressData(pmisMap, s);
+      let maxDist = 0;
+      let peakYear = null;
+      if (dist && dist.years && dist.years.length) {
+        for (let i = 0; i < dist.years.length; i++) {
+          const tot = (dist.punchPerMile[i] || 0) + (dist.acpPerMile[i] || 0) + (dist.pccPerMile[i] || 0) + (dist.spallPerMile[i] || 0);
+          if (tot > maxDist) {
+            maxDist = tot;
+            peakYear = dist.years[i];
+          }
+        }
+      }
+      map.set(s.id, {
+        maxDistress: maxDist,
+        peakYear,
+        hasData: Boolean(dist && dist.years && dist.years.length),
+      });
+    }
+    return map;
+  }, [pmisMap, sections]);
 
   // Discover all distinct slab thicknesses in the project
   const availableSlabThicknesses = useMemo(() => {
@@ -106,13 +195,13 @@ export default function DistressTab({
     });
   }, [sections]);
 
-  // Active sections based on scope and slab thickness filter
+  // Active sections based on scope, slab thickness filter, and inclusion/exclusion
   const targetSections = useMemo(() => {
     let pool = [];
     if (scope === 'selected') {
       pool = selectedSection ? [selectedSection] : [];
     } else {
-      pool = sections || [];
+      pool = (sections || []).filter(s => !excludedSectionIds.has(s.id));
     }
 
     if (slabThFilter !== 'all') {
@@ -128,7 +217,8 @@ export default function DistressTab({
     }
 
     return pool;
-  }, [scope, selectedSection, sections, slabThFilter]);
+  }, [scope, selectedSection, sections, slabThFilter, excludedSectionIds]);
+
 
   // Aggregate distress data
   const aggData = useMemo(() => {
@@ -564,6 +654,52 @@ export default function DistressTab({
             </select>
           </div>
 
+          {/* Section Filter / Exclusion Trigger */}
+          {scope === 'project' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Sections:</span>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => setShowSectionFilterModal(true)}
+                style={{
+                  background: excludedSectionIds.size > 0 ? 'rgba(239, 68, 68, 0.12)' : 'var(--bg-elevated)',
+                  color: excludedSectionIds.size > 0 ? 'var(--error)' : 'var(--text-primary)',
+                  border: excludedSectionIds.size > 0 ? '1px solid var(--error)' : '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '4px 10px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                title="Include or exclude individual sections from distress analysis"
+              >
+                <span>{excludedSectionIds.size > 0 ? '⚠️' : '⚙️'}</span>
+                <span>
+                  {sections.length - excludedSectionIds.size} / {sections.length} Active
+                </span>
+                {excludedSectionIds.size > 0 && (
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      background: 'var(--error)',
+                      color: '#fff',
+                      padding: '1px 5px',
+                      borderRadius: '10px',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {excludedSectionIds.size} excluded
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Primary Y-Axis Custom Scale Controls */}
           <div
             style={{
@@ -703,8 +839,12 @@ export default function DistressTab({
           <InfoMetric
             label="Analyzed Sections"
             value={`${stats.validSections} / ${stats.totalTracked}`}
-            sub={alignMode === 'age' ? 'With construction year' : 'With PMIS data'}
-            accent="var(--accent-secondary)"
+            sub={
+              excludedSectionIds.size > 0
+                ? `${excludedSectionIds.size} excluded manually`
+                : (alignMode === 'age' ? 'With construction year' : 'With PMIS data')
+            }
+            accent={excludedSectionIds.size > 0 ? 'var(--warning)' : 'var(--accent-secondary)'}
           />
 
           <InfoMetric
@@ -785,6 +925,11 @@ export default function DistressTab({
                 : 'Apportioned distress per centerline mile grouped by PMIS evaluation calendar year'}
               {slabThFilter !== 'all' ? ` · Filtered to ${slabThFilter}" slab thickness` : ''}
               {scope === 'selected' && selectedSection ? ` · Section ${selectedSection.id} (${selectedSection.highway})` : ` · Project: ${project?.name || 'All Sections'}`}
+              {excludedSectionIds.size > 0 && (
+                <span style={{ color: 'var(--error)', fontWeight: 600 }}>
+                  {` · (${excludedSectionIds.size} section${excludedSectionIds.size === 1 ? '' : 's'} excluded)`}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -811,6 +956,19 @@ export default function DistressTab({
           </div>
         )}
       </div>
+
+      {/* ── Section Filter Modal ── */}
+      <SectionFilterModal
+        isOpen={showSectionFilterModal}
+        onClose={() => setShowSectionFilterModal(false)}
+        sections={sections}
+        excludedSectionIds={excludedSectionIds}
+        onToggleSection={toggleSectionExclusion}
+        onIncludeAll={includeAllSections}
+        onExcludeAll={excludeAllSections}
+        onInvert={invertSectionSelection}
+        sectionSummaryMap={sectionSummaryMap}
+      />
     </div>
   );
 }
