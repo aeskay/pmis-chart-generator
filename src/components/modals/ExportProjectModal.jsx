@@ -83,7 +83,7 @@ export default function ExportProjectModal({
       className="modal-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="Export Project to Excel"
+      aria-label="Export PMIS Data to Excel"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="modal" style={{ width: '640px', maxWidth: '95vw', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
@@ -92,10 +92,10 @@ export default function ExportProjectModal({
           <div>
             <div className="modal__title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span>📊</span>
-              <span>Export Project to Excel</span>
+              <span>Export PMIS Data to Excel</span>
             </div>
             <div className="modal__subtitle">
-              Select sections to include in the Excel workbook. Each section will be in its own tab.
+              Select sections to include in the Excel workbook. Each section's PMIS history will be in its own tab.
             </div>
           </div>
           <button type="button" className="modal__close" onClick={onClose} aria-label="Close">

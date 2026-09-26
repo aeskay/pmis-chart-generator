@@ -12,7 +12,7 @@
  */
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { exportSectionToExcel } from '../../utils/excelExporter';
+import { exportSectionToExcel, exportSectionInfoToExcel } from '../../utils/excelExporter';
 import CoordinateModal from '../modals/CoordinateModal';
 import BatchGpsModal from '../modals/BatchGpsModal';
 import GisExportModal from '../modals/GisExportModal';
@@ -436,6 +436,29 @@ export default function DataTab({
     }
   };
 
+  const handleExportSectionInfo = () => {
+    const target = selectedIds.size > 0 ? sections.filter(s => selectedIds.has(s.id)) : sections;
+    if (!target || target.length === 0) {
+      if (addToast) addToast('warning', 'No Sections', 'No sections available to export.');
+      return;
+    }
+    try {
+      exportSectionInfoToExcel(target, projectName);
+      if (addToast) {
+        addToast(
+          'success',
+          'Section Info Exported',
+          `Exported ${target.length} section(s) with Roadbed L & R coordinates to Excel.`
+        );
+      }
+    } catch (err) {
+      console.error('Failed to export section info:', err);
+      if (addToast) {
+        addToast('error', 'Export Failed', 'An error occurred while exporting section info: ' + (err.message || err));
+      }
+    }
+  };
+
   // ── Empty State ────────────────────────────────────────────────────────────
   if (sections.length === 0) {
     return (
@@ -583,17 +606,40 @@ export default function DataTab({
             <span>Export GIS / KML</span>
           </button>
 
-          {/* Project Export Modal Trigger */}
+          {/* Export Section Info Button */}
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            onClick={handleExportSectionInfo}
+            title={selectedIds.size > 0
+              ? `Export ${selectedIds.size} selected section(s) with Roadbed L & R GPS coordinates to Excel`
+              : 'Export all sections with Roadbed L & R GPS coordinates to Excel'}
+            style={{
+              gap: 5,
+              fontSize: '12px',
+              padding: '4px 10px',
+              fontWeight: 600,
+            }}
+          >
+            <span>📑</span>
+            <span>
+              {selectedIds.size > 0
+                ? `Export Section Info (${selectedIds.size})`
+                : 'Export Section Info'}
+            </span>
+          </button>
+
+          {/* PMIS Data Export Modal Trigger */}
           {onOpenProjectExport && (
             <button
               type="button"
               className="btn btn--primary btn--sm"
               onClick={onOpenProjectExport}
-              title="Export project or selected sections to multi-sheet Excel (.xlsx)"
+              title="Export PMIS condition & distress evaluation data to multi-sheet Excel (.xlsx)"
               style={{ gap: 5, fontSize: '12px', padding: '4px 10px' }}
             >
               <span>📊</span>
-              <span>Export Project to Excel</span>
+              <span>Export PMIS Data</span>
             </button>
           )}
         </div>

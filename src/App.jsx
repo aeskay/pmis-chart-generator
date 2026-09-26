@@ -720,9 +720,9 @@ export default function App() {
               id="btn-export-excel"
               className="btn btn--secondary btn--sm"
               onClick={() => setShowExportProjectModal(true)}
-              title="Export project or selected sections to Excel (.xlsx)"
+              title="Export PMIS data to Excel (.xlsx)"
             >
-              📊 Export Excel
+              📊 Export PMIS
             </button>
           )}
 

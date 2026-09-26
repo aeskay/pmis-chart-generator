@@ -275,3 +275,222 @@ export function exportAggregateDistressToExcel(aggData, title = 'Distress_Accumu
   XLSX.writeFile(wb, `${safeName}.xlsx`);
 }
 
+/**
+ * Export section inventory attributes and R & L GPS coordinates to a dedicated Excel workbook.
+ * Creates:
+ *  - Sheet 1: "Roadbed R" with section info, DFOs, and Roadbed R GPS Start & End
+ *  - Sheet 2: "Roadbed L" with section info, DFOs, and Roadbed L GPS Start & End
+ *  - Sheet 3: "All Sections Summary" with side-by-side R and L GPS coordinates
+ */
+export function exportSectionInfoToExcel(sections, projectName = 'PMIS_Project') {
+  if (!Array.isArray(sections) || sections.length === 0) {
+    alert('No sections to export.');
+    return;
+  }
+
+  const wb = XLSX.utils.book_new();
+
+  // Helper to extract roadbed specific row
+  function buildRoadbedRow(s, bedKey) {
+    const c = s.coordinates || {};
+    const bed = bedKey === 'R' ? c.R : c.L;
+
+    const slab = s.slabTh ?? s.oldSlabTh;
+    const slabVal = slab !== null && slab !== undefined && String(slab).trim() !== '' ? slab : '';
+
+    const gpsStart = bed?.begin ? `${bed.begin[0].toFixed(6)}, ${bed.begin[1].toFixed(6)}` : '';
+    const gpsEnd = bed?.end ? `${bed.end[0].toFixed(6)}, ${bed.end[1].toFixed(6)}` : '';
+    const startLat = bed?.begin ? bed.begin[0] : '';
+    const startLon = bed?.begin ? bed.begin[1] : '';
+    const endLat = bed?.end ? bed.end[0] : '';
+    const endLon = bed?.end ? bed.end[1] : '';
+
+    const beginDfo = bed?.beginDfo ?? s.beginDfo ?? '';
+    const endDfo = bed?.endDfo ?? s.endDfo ?? '';
+    const lengthMiles = bed?.lengthMiles ?? (beginDfo !== '' && endDfo !== '' ? Math.abs(endDfo - beginDfo).toFixed(3) : '');
+
+    return [
+      s.id ?? '',
+      s.sn ?? '',
+      s.csj ?? '',
+      s.highway ?? '',
+      s.countyName ?? '',
+      s.district ?? '',
+      formatRef(s.beginRef),
+      formatRef(s.endRef),
+      beginDfo,
+      endDfo,
+      lengthMiles,
+      gpsStart,
+      gpsEnd,
+      startLat,
+      startLon,
+      endLat,
+      endLon,
+      bed?.routeId ?? '',
+      slabVal,
+      s.base ?? '',
+      s.baseTh ?? '',
+      s.sub ?? '',
+      s.yearConstructed ?? '',
+      s.endOfLife ?? '',
+      s.serviceLife ?? '',
+      s.rehabMethod ?? '',
+    ];
+  }
+
+  const headers = [
+    'Section ID',
+    'S/N',
+    'CSJ',
+    'Highway',
+    'County',
+    'District',
+    'Begin Ref (TRM)',
+    'End Ref (TRM)',
+    'Begin DFO',
+    'End DFO',
+    'Length (mi)',
+    'GPS Start',
+    'GPS End',
+    'Start Latitude',
+    'Start Longitude',
+    'End Latitude',
+    'End Longitude',
+    'TxDOT Roadway ID',
+    'Slab Thickness (in)',
+    'Base Type',
+    'Base Thickness (in)',
+    'Subgrade',
+    'Year Constructed',
+    'End of Life',
+    'Service Life (yrs)',
+    'Rehab Method',
+  ];
+
+  const colWidths = [
+    { wch: 14 }, // Section ID
+    { wch: 8 },  // S/N
+    { wch: 16 }, // CSJ
+    { wch: 12 }, // Highway
+    { wch: 16 }, // County
+    { wch: 14 }, // District
+    { wch: 16 }, // Begin Ref
+    { wch: 16 }, // End Ref
+    { wch: 12 }, // Begin DFO
+    { wch: 12 }, // End DFO
+    { wch: 12 }, // Length
+    { wch: 26 }, // GPS Start
+    { wch: 26 }, // GPS End
+    { wch: 16 }, // Start Lat
+    { wch: 16 }, // Start Lon
+    { wch: 16 }, // End Lat
+    { wch: 16 }, // End Lon
+    { wch: 18 }, // TxDOT Route ID
+    { wch: 18 }, // Slab Th
+    { wch: 14 }, // Base Type
+    { wch: 18 }, // Base Th
+    { wch: 14 }, // Subgrade
+    { wch: 16 }, // Yr Const
+    { wch: 14 }, // End of Life
+    { wch: 16 }, // Service Life
+    { wch: 16 }, // Rehab
+  ];
+
+  // 1. Sheet 1: Roadbed R
+  const rowsR = [headers];
+  sections.forEach(s => rowsR.push(buildRoadbedRow(s, 'R')));
+  const wsR = XLSX.utils.aoa_to_sheet(rowsR);
+  wsR['!cols'] = colWidths;
+  XLSX.utils.book_append_sheet(wb, wsR, 'Roadbed R');
+
+  // 2. Sheet 2: Roadbed L
+  const rowsL = [headers];
+  sections.forEach(s => rowsL.push(buildRoadbedRow(s, 'L')));
+  const wsL = XLSX.utils.aoa_to_sheet(rowsL);
+  wsL['!cols'] = colWidths;
+  XLSX.utils.book_append_sheet(wb, wsL, 'Roadbed L');
+
+  // 3. Sheet 3: Summary Sheet with both R and L
+  const summaryHeaders = [
+    'Section ID',
+    'CSJ',
+    'Highway',
+    'County',
+    'District',
+    'Begin Ref',
+    'End Ref',
+    'Slab Th (in)',
+    'GPS Start (R)',
+    'GPS End (R)',
+    'Length R (mi)',
+    'GPS Start (L)',
+    'GPS End (L)',
+    'Length L (mi)',
+    'Yr Const',
+    'Rehab Method',
+  ];
+
+  const summaryRows = [summaryHeaders];
+  sections.forEach(s => {
+    const c = s.coordinates || {};
+    const slab = s.slabTh ?? s.oldSlabTh;
+    const slabVal = slab !== null && slab !== undefined && String(slab).trim() !== '' ? slab : '';
+
+    const gpsStartR = c.R?.begin ? `${c.R.begin[0].toFixed(6)}, ${c.R.begin[1].toFixed(6)}` : '—';
+    const gpsEndR = c.R?.end ? `${c.R.end[0].toFixed(6)}, ${c.R.end[1].toFixed(6)}` : '—';
+    const lenR = c.R?.lengthMiles ?? '—';
+
+    const gpsStartL = c.L?.begin ? `${c.L.begin[0].toFixed(6)}, ${c.L.begin[1].toFixed(6)}` : '—';
+    const gpsEndL = c.L?.end ? `${c.L.end[0].toFixed(6)}, ${c.L.end[1].toFixed(6)}` : '—';
+    const lenL = c.L?.lengthMiles ?? '—';
+
+    summaryRows.push([
+      s.id ?? '',
+      s.csj ?? '',
+      s.highway ?? '',
+      s.countyName ?? '',
+      s.district ?? '',
+      formatRef(s.beginRef),
+      formatRef(s.endRef),
+      slabVal,
+      gpsStartR,
+      gpsEndR,
+      lenR,
+      gpsStartL,
+      gpsEndL,
+      lenL,
+      s.yearConstructed ?? '',
+      s.rehabMethod ?? '',
+    ]);
+  });
+
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  wsSummary['!cols'] = [
+    { wch: 14 }, // Section ID
+    { wch: 16 }, // CSJ
+    { wch: 12 }, // Highway
+    { wch: 16 }, // County
+    { wch: 14 }, // District
+    { wch: 14 }, // Begin Ref
+    { wch: 14 }, // End Ref
+    { wch: 14 }, // Slab Th
+    { wch: 25 }, // GPS Start R
+    { wch: 25 }, // GPS End R
+    { wch: 14 }, // Length R
+    { wch: 25 }, // GPS Start L
+    { wch: 25 }, // GPS End L
+    { wch: 14 }, // Length L
+    { wch: 12 }, // Yr Const
+    { wch: 16 }, // Rehab
+  ];
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'All Sections Summary');
+
+  const safeProjectName = (projectName || 'PMIS_Project')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .trim();
+  const fileName = `${safeProjectName || 'PMIS_Project'}_Section_Info.xlsx`;
+
+  XLSX.writeFile(wb, fileName);
+}
+
