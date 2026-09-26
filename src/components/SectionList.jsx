@@ -211,8 +211,9 @@ export default function SectionList({
         <ColumnMappingModal
           csvHeaders={csvHeaders}
           csvRows={csvRows}
-          onImport={(imported) => {
-            onAddSections(imported);
+          existingSections={sections}
+          onImport={(imported, importMode) => {
+            onAddSections(imported, importMode);
             setShowCsvModal(false);
           }}
           onCancel={() => setShowCsvModal(false)}

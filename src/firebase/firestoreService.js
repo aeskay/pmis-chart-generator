@@ -27,6 +27,7 @@ function sanitizeProject(project) {
       ? project.sections.map(s => ({
           _uuid:           s._uuid || s.id,
           id:              s.id || '',
+          csj:             s.csj || null,
           sn:              s.sn || null,
           district:        s.district || '',
           highway:         s.highway || '',

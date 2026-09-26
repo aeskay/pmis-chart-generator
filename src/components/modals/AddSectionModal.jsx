@@ -14,6 +14,7 @@ const REQUIRED_FIELDS = [
 ];
 
 const OPTIONAL_FIELDS = [
+  { key: 'csj',             label: 'CSJ',             type: 'text',   placeholder: 'e.g., 0123-04-056' },
   { key: 'sn',              label: 'S/N',             type: 'text',   placeholder: '1' },
   { key: 'yearConstructed', label: 'Year Constructed', type: 'number', placeholder: '1998' },
   { key: 'endOfLife',       label: 'End of Life',      type: 'number', placeholder: '2018' },
@@ -41,6 +42,7 @@ export default function AddSectionModal({
     if (initialData) {
       setForm({
         ...initialData,
+        csj: initialData.csj ?? '',
         beginRef: initialData.beginRef ?? '',
         endRef: initialData.endRef ?? '',
         yearConstructed: initialData.yearConstructed ?? '',
@@ -90,6 +92,7 @@ export default function AddSectionModal({
       ...(initialData || {}),
       _uuid:           initialData?._uuid || uuidv4(),
       id:              form.id?.toString().trim(),
+      csj:             form.csj?.toString().trim() || null,
       sn:              form.sn?.toString().trim() || null,
       district:        form.district?.toString().trim(),
       highway:         form.highway?.toString().trim(),

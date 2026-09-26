@@ -16,6 +16,7 @@ const REQUIRED_FIELDS = [
 ];
 
 const OPTIONAL_FIELDS = [
+  { appKey: 'csj',             label: 'CSJ',              hint: 'Control Section Job (e.g. 0123-04-056)' },
   { appKey: 'sn',              label: 'S/N' },
   { appKey: 'yearConstructed', label: 'Year Constructed' },
   { appKey: 'endOfLife',       label: 'End of Life' },
@@ -35,6 +36,7 @@ const SUGGEST_MAP = {
   highway:         ['highway', 'hwy', 'signed hwy', 'roadbed', 'highway roadbed'],
   beginRef:        ['begin ref', 'begin_ref', 'begin', 'start ref', 'start_ref', 'beg ref', 'beg trm'],
   endRef:          ['end ref', 'end_ref', 'end', 'ending ref', 'end trm'],
+  csj:             ['csj', 'csj number', 'control section job', 'control section', 'job number', 'project csj', 'cont sec job', 'csj no'],
   sn:              ['s/n', 'sn', 'section number', 'sec no'],
   yearConstructed: ['year constructed', 'yr constructed', 'year const', 'construction year', 'yr const'],
   endOfLife:       ['end of life', 'eol', 'end life'],
@@ -73,6 +75,7 @@ function buildSection(row, mappings, customMappings) {
   return {
     _uuid:           uuidv4(),
     id:              String(get('id') ?? '').trim(),
+    csj:             String(get('csj') ?? '').trim() || null,
     sn:              String(get('sn') ?? '').trim() || null,
     district:        String(get('district') ?? '').trim(),
     highway:         String(get('highway') ?? '').trim(),
@@ -93,7 +96,8 @@ function buildSection(row, mappings, customMappings) {
 }
 
 // ─── Main component ──────────────────────────────────────────────────────────
-export default function ColumnMappingModal({ csvHeaders, csvRows, onImport, onCancel }) {
+export default function ColumnMappingModal({ csvHeaders, csvRows, existingSections = [], onImport, onCancel }) {
+  const [importMode, setImportMode] = useState('merge'); // 'merge' | 'overwrite'
   const [mappings, setMappings] = useState(() => {
     const initial = {};
     for (const f of [...REQUIRED_FIELDS, ...OPTIONAL_FIELDS]) {
@@ -101,6 +105,21 @@ export default function ColumnMappingModal({ csvHeaders, csvRows, onImport, onCa
     }
     return initial;
   });
+
+  const existingIdSet = useMemo(() => {
+    return new Set((existingSections || []).map(s => String(s.id).trim().toLowerCase()));
+  }, [existingSections]);
+
+  const matchingExistingCount = useMemo(() => {
+    const idCol = mappings.id;
+    if (!idCol || !existingIdSet.size) return 0;
+    let count = 0;
+    for (const row of csvRows) {
+      const val = String(row[idCol] ?? '').trim().toLowerCase();
+      if (val && existingIdSet.has(val)) count++;
+    }
+    return count;
+  }, [csvRows, mappings.id, existingIdSet]);
 
   const [customMappings, setCustomMappings] = useState([]); // [{ id, customKey, csvCol }]
   const [errors, setErrors] = useState({});
@@ -150,7 +169,7 @@ export default function ColumnMappingModal({ csvHeaders, csvRows, onImport, onCa
       return true;
     });
 
-    onImport(unique);
+    onImport(unique, importMode);
   }
 
   // Preview: first CSV row values
@@ -219,6 +238,52 @@ export default function ColumnMappingModal({ csvHeaders, csvRows, onImport, onCa
         </div>
 
         <div className="modal__body">
+          {matchingExistingCount > 0 && (
+            <div style={{
+              background: 'rgba(59, 130, 246, 0.08)',
+              border: '1px solid var(--accent-primary)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '12px 16px',
+              marginBottom: 16,
+              fontSize: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--accent-primary)' }}>
+                <span>🔄</span>
+                <span>
+                  {matchingExistingCount} of {csvRows.length} rows match existing section IDs in this project
+                </span>
+              </div>
+              <div style={{ color: 'var(--text-secondary)' }}>
+                Matching sections will be updated with your newly mapped columns (such as CSJ) without creating duplicate sections.
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 4 }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '12px' }}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    value="merge"
+                    checked={importMode === 'merge'}
+                    onChange={() => setImportMode('merge')}
+                  />
+                  <span><strong>Smart Merge (Recommended):</strong> Update matched columns (e.g. CSJ) & keep existing unmapped data</span>
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '12px' }}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    value="overwrite"
+                    checked={importMode === 'overwrite'}
+                    onChange={() => setImportMode('overwrite')}
+                  />
+                  <span><strong>Overwrite:</strong> Completely replace existing matching sections</span>
+                </label>
+              </div>
+            </div>
+          )}
+
           <div className="mapping-grid">
             {/* Required fields */}
             <div className="mapping-section-title">

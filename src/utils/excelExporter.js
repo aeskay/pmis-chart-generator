@@ -82,6 +82,7 @@ export function buildSectionSheetAoa(section, pmisMap) {
     `RM (Actual): ${actualRmStr}`,
     `Yr Const: ${section.yearConstructed ?? '—'}`,
     `End of Life: ${section.endOfLife ?? '—'}`,
+    `CSJ: ${section.csj ?? '—'}`,
     `Rehab: ${section.rehabMethod ?? '—'}`,
     `S/N: ${section.sn ?? '—'}`,
   ];

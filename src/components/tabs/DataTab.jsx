@@ -17,6 +17,7 @@ import { exportSectionToExcel } from '../../utils/excelExporter';
 const COLUMNS = [
   { key: 'id',              label: 'ID',              mono: true,  numeric: false },
   { key: 'sn',              label: 'S/N',             mono: true,  numeric: false },
+  { key: 'csj',             label: 'CSJ',             mono: true,  numeric: false },
   { key: 'highway',         label: 'Highway',         mono: true,  numeric: false },
   { key: 'district',        label: 'District',        mono: false, numeric: false },
   { key: 'beginRef',        label: 'Begin Ref',       mono: true,  numeric: true, fmt: v => (typeof v === 'number' ? v.toFixed(3) : v) },

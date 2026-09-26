@@ -424,14 +424,77 @@ export default function App() {
   }, []);
 
   // ── Section actions ────────────────────────────────────────────────────────
-  const handleAddSections = useCallback((sections) => {
+  const handleAddSections = useCallback((newSections, importMode = 'merge') => {
     if (!selectedProjectId) return;
+    let addedCount = 0;
+    let updatedCount = 0;
+
     mutate(prev => {
-      const nextProjects = prev.projects.map(p =>
-        p.id === selectedProjectId
-          ? { ...p, sections: [...p.sections, ...sections] }
-          : p
-      );
+      const nextProjects = prev.projects.map(p => {
+        if (p.id !== selectedProjectId) return p;
+
+        if (importMode === 'overwrite') {
+          // Replace any existing section with matching ID, or append if new
+          const incomingMap = new Map(newSections.map(s => [String(s.id).trim().toLowerCase(), s]));
+          const nextSections = p.sections.map(existing => {
+            const key = String(existing.id).trim().toLowerCase();
+            if (incomingMap.has(key)) {
+              const incoming = incomingMap.get(key);
+              incomingMap.delete(key);
+              updatedCount++;
+              return { ...incoming, _uuid: existing._uuid || incoming._uuid };
+            }
+            return existing;
+          });
+          for (const remaining of incomingMap.values()) {
+            nextSections.push(remaining);
+            addedCount++;
+          }
+          return { ...p, sections: nextSections };
+        }
+
+        // Default: 'merge' mode (Smart Merge)
+        const existingKeyMap = new Map();
+        p.sections.forEach((s, idx) => {
+          existingKeyMap.set(String(s.id).trim().toLowerCase(), idx);
+        });
+
+        const mergedSections = [...p.sections];
+
+        for (const incoming of newSections) {
+          const key = String(incoming.id).trim().toLowerCase();
+          if (existingKeyMap.has(key)) {
+            // Update existing section: update non-null, non-empty incoming fields
+            const idx = existingKeyMap.get(key);
+            const existing = mergedSections[idx];
+            const updated = { ...existing };
+
+            for (const [k, v] of Object.entries(incoming)) {
+              if (v !== null && v !== undefined && v !== '' && !Number.isNaN(v)) {
+                updated[k] = v;
+              }
+            }
+
+            // Ensure ID and _uuid are preserved/consistent
+            updated._uuid = existing._uuid || incoming._uuid;
+            updated.extraColumns = {
+              ...(existing.extraColumns || {}),
+              ...(incoming.extraColumns || {}),
+            };
+
+            mergedSections[idx] = updated;
+            updatedCount++;
+          } else {
+            // Brand new section
+            mergedSections.push(incoming);
+            existingKeyMap.set(key, mergedSections.length - 1);
+            addedCount++;
+          }
+        }
+
+        return { ...p, sections: mergedSections };
+      });
+
       if (currentUser) {
         const updated = nextProjects.find(p => p.id === selectedProjectId);
         if (updated) {
@@ -443,7 +506,14 @@ export default function App() {
       }
       return { ...prev, projects: nextProjects };
     });
-    addToast('success', `${sections.length} section(s) added`);
+
+    if (updatedCount > 0 && addedCount > 0) {
+      addToast('success', 'Import complete', `${updatedCount} section(s) updated, ${addedCount} added`);
+    } else if (updatedCount > 0) {
+      addToast('success', 'Sections updated', `${updatedCount} existing section(s) updated with new data`);
+    } else {
+      addToast('success', `${addedCount || newSections.length} section(s) added`);
+    }
   }, [mutate, selectedProjectId, addToast, currentUser]);
 
   const handleDeleteSection = useCallback((sectionId) => {

@@ -444,7 +444,7 @@ export default function ConditionTab({ section, pmisMap, pmisLoading, pmisProgre
         <InfoCard label="Yr. Const."  value={section.yearConstructed} accent="var(--success)" />
         <InfoCard label="End of Life" value={section.endOfLife}        accent="var(--error)" />
         <InfoCard label="County"      value={section.countyName} />
-        <InfoCard label="Rehab"       value={section.rehabMethod} />
+        <InfoCard label="CSJ"         value={section.csj} accent="var(--accent-secondary)" />
       </div>
 
       {roadbeds.length > 0 ? (
