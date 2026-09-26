@@ -268,7 +268,7 @@ export default function DistributionTab({
     const textVals = CATEGORIES.map(cat => {
       const cnt = dist.counts[cat];
       const pct = dist.percents[cat].toFixed(1);
-      return viewMode === 'count' ? `${cnt} (${pct}%)` : `${pct}% (${cnt})`;
+      return viewMode === 'count' ? `<b>${cnt}</b> (${pct}%)` : `<b>${pct}%</b> (${cnt})`;
     });
 
     const colors = CATEGORIES.map(cat => CATEGORY_COLORS[cat]);
@@ -283,10 +283,10 @@ export default function DistributionTab({
         text: textVals,
         textposition: 'outside',
         cliponaxis: false,
-        textfont: { size: 12, color: '#000', family: 'Inter, sans-serif' },
+        textfont: { size: 14, color: '#000', family: 'Inter, sans-serif' },
         marker: {
           color: colors,
-          line: { color: '#000000', width: 1 },
+          line: { color: '#000000', width: 1.2 },
         },
         customdata: customData,
         hovertemplate:
@@ -298,33 +298,39 @@ export default function DistributionTab({
 
     const maxY = Math.max(...yVals, 1);
     const upperLimit = viewMode === 'count'
-      ? Math.ceil(maxY * 1.25)
-      : Math.min(100, Math.ceil((maxY + 10) / 10) * 10);
+      ? Math.ceil(maxY * 1.35) + 1
+      : Math.min(100, Math.ceil((maxY + 15) / 10) * 10);
 
     const layout = {
       template: 'plotly_white',
       paper_bgcolor: '#ffffff',
       plot_bgcolor: '#ffffff',
-      margin: { t: 40, b: 60, l: 55, r: 25 },
-      height: 340,
+      margin: { t: 45, b: 75, l: 65, r: 25 },
+      height: 380,
       showlegend: false,
       xaxis: {
-        tickfont: { size: 12, color: '#000' },
+        title: {
+          text: '<b>PMIS Category</b>',
+          font: { size: 16, color: '#000' },
+        },
+        tickfont: { size: 14, color: '#000', family: 'Inter, sans-serif' },
         showline: true,
-        linewidth: 1.5,
+        linewidth: 2,
         linecolor: '#000',
+        mirror: true,
         ticks: 'inside',
       },
       yaxis: {
         title: {
-          text: viewMode === 'count' ? '<b>Number of Sections</b>' : '<b>Percentage (%)</b>',
-          font: { size: 13, color: '#000' },
+          text: viewMode === 'count' ? '<b>Number of Sections</b>' : '<b>Percentage of Sections (%)</b>',
+          font: { size: 16, color: '#000' },
         },
         range: [0, upperLimit],
-        tickfont: { size: 11, color: '#000' },
+        tickfont: { size: 13, color: '#000' },
         showline: true,
-        linewidth: 1.5,
+        linewidth: 2,
         linecolor: '#000',
+        mirror: true,
         ticks: 'inside',
         gridcolor: 'rgba(0,0,0,0.08)',
       },
