@@ -28,6 +28,7 @@ import CoordinateModal from '../modals/CoordinateModal';
 import BatchGpsModal from '../modals/BatchGpsModal';
 import GisExportModal from '../modals/GisExportModal';
 import { downloadSingleSectionKml } from '../../utils/gisExporter';
+import texasBoundary from '../../utils/texasBoundary.json';
 
 const CARTO_KEY = import.meta.env.VITE_CARTO_API_KEY || 'cb1_3x0o_1_0e98f5ff4c4adb42019dcfeb';
 const cartoKeyParam = CARTO_KEY ? `?key=${CARTO_KEY}` : '';
@@ -91,6 +92,7 @@ export default function MapTab({
   const [colorMetric, setColorMetric] = useState('condition'); // 'condition' | 'distress' | 'ride' | 'roadbed' | 'slab'
   const [roadbedFilter, setRoadbedFilter] = useState('both');   // 'both' | 'R' | 'L'
   const [endpointMarkers, setEndpointMarkers] = useState('none'); // 'none' | 'selected' | 'faint'
+  const [texasOnly, setTexasOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');      // 'all' | 'mapped' | 'unmapped'
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -108,6 +110,7 @@ export default function MapTab({
   const tileLayerRef = useRef(null);
   const labelsLayerRef = useRef(null);
   const layersGroupRef = useRef(null);
+  const maskLayerRef = useRef(null);
   const sectionLayersMapRef = useRef(new Map()); // sectionId -> array of layers
 
   // ── Compute Section Scores ────────────────────────────────────────────────
@@ -215,6 +218,10 @@ export default function MapTab({
     // Custom top-right zoom control
     L.control.zoom({ position: 'topright' }).addTo(map);
 
+    // Dedicated mask pane between tilePane (200) and overlayPane (400)
+    const maskPane = map.createPane('maskPane');
+    maskPane.style.zIndex = '350';
+
     // Initial Tile Layer
     const baseConfig = BASEMAPS[selectedBasemap] || BASEMAPS.dark;
     const tileLayer = L.tileLayer(baseConfig.url, {
@@ -262,6 +269,95 @@ export default function MapTab({
       }).addTo(map);
     }
   }, [selectedBasemap]);
+
+  // ── Texas-Only Mask Effect (Hides all surrounding states/countries) ───────
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (maskLayerRef.current) {
+      map.removeLayer(maskLayerRef.current);
+      maskLayerRef.current = null;
+    }
+
+    if (!texasOnly) {
+      return;
+    }
+
+    // Mask background matches basemap environment
+    const maskBg =
+      selectedBasemap === 'dark'
+        ? '#0b0f19'
+        : selectedBasemap === 'satellite'
+        ? '#070b14'
+        : '#ffffff';
+
+    const borderColor =
+      selectedBasemap === 'dark' || selectedBasemap === 'satellite'
+        ? '#38bdf8'
+        : '#475569';
+
+    const worldRing = [
+      [-180, 90],
+      [180, 90],
+      [180, -90],
+      [-180, -90],
+      [-180, 90],
+    ];
+
+    const texasHole = texasBoundary.geometry.coordinates[0];
+
+    const maskGeoJson = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: { name: 'Texas Mask' },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [worldRing, texasHole],
+          },
+        },
+        {
+          type: 'Feature',
+          properties: { name: 'Texas Border' },
+          geometry: texasBoundary.geometry,
+        },
+      ],
+    };
+
+    const maskLayer = L.geoJSON(maskGeoJson, {
+      pane: 'maskPane',
+      style: (feature) => {
+        if (feature.properties.name === 'Texas Mask') {
+          return {
+            fillColor: maskBg,
+            fillOpacity: 1.0,
+            stroke: false,
+            interactive: false,
+          };
+        }
+        return {
+          fill: false,
+          color: borderColor,
+          weight: 2,
+          opacity: 0.9,
+          dashArray: '4, 4',
+          interactive: false,
+        };
+      },
+    });
+
+    maskLayer.addTo(map);
+    maskLayerRef.current = maskLayer;
+
+    // Smoothly frame Texas for clean screenshot
+    const txBounds = L.latLngBounds([
+      [25.837, -106.646],
+      [36.501, -93.508],
+    ]);
+    map.flyToBounds(txBounds, { padding: [15, 15], duration: 0.8 });
+  }, [texasOnly, selectedBasemap]);
 
   // ── Color Resolving Helper ────────────────────────────────────────────────
   const getLineColor = (section, roadbed) => {
@@ -545,8 +641,19 @@ export default function MapTab({
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleFitAll = () => {
     const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (texasOnly) {
+      const txBounds = L.latLngBounds([
+        [25.837, -106.646],
+        [36.501, -93.508],
+      ]);
+      map.flyToBounds(txBounds, { padding: [15, 15], duration: 0.8 });
+      return;
+    }
+
     const group = layersGroupRef.current;
-    if (!map || !group) return;
+    if (!group) return;
 
     const layers = group.getLayers();
     if (layers.length === 0) {
@@ -709,6 +816,28 @@ export default function MapTab({
               <option value="faint">Faint Neutral Dots</option>
             </select>
           </div>
+
+          <div style={{ width: 1, height: 18, background: 'var(--border-default)' }} />
+
+          {/* Texas Only Focus Toggle Button */}
+          <button
+            type="button"
+            className={`btn btn--sm ${texasOnly ? 'btn--primary' : 'btn--secondary'}`}
+            onClick={() => setTexasOnly(prev => !prev)}
+            title={texasOnly ? 'Currently showing Texas only (click to show all surrounding areas)' : 'Mask areas outside Texas for clean presentation screenshots'}
+            style={{
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              padding: '4px 10px',
+              borderRadius: 4,
+              border: texasOnly ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
+              boxShadow: texasOnly ? '0 0 10px rgba(59, 130, 246, 0.4)' : undefined,
+            }}
+          >
+            <span>{texasOnly ? '📍' : '🗺️'}</span>
+            <span>{texasOnly ? 'Texas Only: ON' : 'Show Only Texas'}</span>
+          </button>
         </div>
 
         {/* Right Toolbar Actions */}
