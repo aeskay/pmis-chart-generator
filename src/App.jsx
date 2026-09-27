@@ -13,6 +13,7 @@ import Sidebar from './components/Sidebar';
 import ConditionTab from './components/tabs/ConditionTab';
 import DistressTab from './components/tabs/DistressTab';
 import DistributionTab from './components/tabs/DistributionTab';
+import ChartsTab from './components/tabs/ChartsTab';
 import DataTab from './components/tabs/DataTab';
 import MapTab from './components/tabs/MapTab';
 import ToastContainer from './components/ToastContainer';
@@ -48,6 +49,7 @@ const TABS = [
   { id: 'condition',    label: 'Condition',    icon: '📈' },
   { id: 'distress',     label: 'Distress',     icon: '📊' },
   { id: 'distribution', label: 'Distribution', icon: '📉' },
+  { id: 'charts',       label: 'Charts',       icon: '📊' },
   { id: 'data',         label: 'Data',         icon: '📋' },
   { id: 'map',          label: 'Map',          icon: '🗺️' },
 ];
@@ -811,6 +813,15 @@ export default function App() {
                 pmisMap={pmisMap}
                 pmisLoading={pmisLoading}
                 pmisProgress={pmisProgress}
+              />
+            )}
+            {activeTab === 'charts' && (
+              <ChartsTab
+                project={selectedProject}
+                sections={projectSections}
+                pmisMap={pmisMap}
+                onSelectSection={(id) => { handleSelectSection(id); setActiveTab('condition'); }}
+                addToast={addToast}
               />
             )}
             {activeTab === 'data' && (
