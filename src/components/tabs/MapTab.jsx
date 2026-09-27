@@ -90,6 +90,7 @@ export default function MapTab({
   const [selectedBasemap, setSelectedBasemap] = useState('dark');
   const [colorMetric, setColorMetric] = useState('condition'); // 'condition' | 'distress' | 'ride' | 'roadbed' | 'slab'
   const [roadbedFilter, setRoadbedFilter] = useState('both');   // 'both' | 'R' | 'L'
+  const [endpointMarkers, setEndpointMarkers] = useState('none'); // 'none' | 'selected' | 'faint'
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');      // 'all' | 'mapped' | 'unmapped'
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -471,28 +472,35 @@ export default function MapTab({
           }, 50);
         });
 
-        // Start / End Endpoint Markers
-        const startIcon = L.divIcon({
-          className: 'custom-map-pin pin-start',
-          html: `<div style="width: 10px; height: 10px; border-radius: 50%; background: #22c55e; border: 2px solid #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.4);"></div>`,
-          iconSize: [10, 10],
-          iconAnchor: [5, 5],
-        });
-        const endIcon = L.divIcon({
-          className: 'custom-map-pin pin-end',
-          html: `<div style="width: 10px; height: 10px; border-radius: 50%; background: #ef4444; border: 2px solid #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.4);"></div>`,
-          iconSize: [10, 10],
-          iconAnchor: [5, 5],
-        });
+        // Start / End Endpoint Markers (neutral, subtle halos — never red or green to avoid confusion with condition scores)
+        const shouldShowPoints =
+          endpointMarkers === 'faint' ||
+          (endpointMarkers === 'selected' && isSelected);
 
-        const startMarker = L.marker(latLngs[0], { icon: startIcon, interactive: false });
-        const endMarker = L.marker(latLngs[latLngs.length - 1], { icon: endIcon, interactive: false });
+        if (shouldShowPoints) {
+          const startIcon = L.divIcon({
+            className: 'custom-map-pin pin-neutral-start',
+            html: `<div style="width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.45); border: 2px solid rgba(255,255,255,0.9); box-shadow: 0 1px 3px rgba(0,0,0,0.5);" title="Start: ${section.id} (${letter})"></div>`,
+            iconSize: [8, 8],
+            iconAnchor: [4, 4],
+          });
+          const endIcon = L.divIcon({
+            className: 'custom-map-pin pin-neutral-end',
+            html: `<div style="width: 8px; height: 8px; border-radius: 50%; background: rgba(15,23,42,0.6); border: 2px solid rgba(255,255,255,0.9); box-shadow: 0 1px 3px rgba(0,0,0,0.5);" title="End: ${section.id} (${letter})"></div>`,
+            iconSize: [8, 8],
+            iconAnchor: [4, 4],
+          });
+
+          const startMarker = L.marker(latLngs[0], { icon: startIcon, interactive: false });
+          const endMarker = L.marker(latLngs[latLngs.length - 1], { icon: endIcon, interactive: false });
+
+          group.addLayer(startMarker);
+          group.addLayer(endMarker);
+          secLayers.push(startMarker, endMarker);
+        }
 
         group.addLayer(polyline);
-        group.addLayer(startMarker);
-        group.addLayer(endMarker);
-
-        secLayers.push(polyline, startMarker, endMarker);
+        secLayers.push(polyline);
       });
 
       sectionLayersMapRef.current.set(section.id, secLayers);
@@ -503,7 +511,7 @@ export default function MapTab({
       const bounds = L.latLngBounds(allLatLngs);
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
     }
-  }, [mappedSections, colorMetric, roadbedFilter, selectedSectionId, sectionScores]);
+  }, [mappedSections, colorMetric, roadbedFilter, selectedSectionId, sectionScores, endpointMarkers]);
 
   // ── Fly to Selected Section on Selection Change ───────────────────────────
   useEffect(() => {
@@ -683,6 +691,22 @@ export default function MapTab({
               <option value="satellite">Satellite Hybrid</option>
               <option value="streets">Streets (OSM)</option>
               <option value="topo">Topographic (Esri)</option>
+            </select>
+          </div>
+
+          {/* Endpoints Display Option */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Points:</span>
+            <select
+              className="select-input"
+              value={endpointMarkers}
+              onChange={e => setEndpointMarkers(e.target.value)}
+              title="Configure endpoint marker visibility"
+              style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4 }}
+            >
+              <option value="none">No Points (Clean)</option>
+              <option value="selected">Selected Only</option>
+              <option value="faint">Faint Neutral Dots</option>
             </select>
           </div>
         </div>
