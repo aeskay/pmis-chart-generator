@@ -5,27 +5,131 @@
  * 
  * Supports both R (Right / Inventory direction) and L (Left / Opposing direction) roadbeds,
  * as well as undivided (KG) highways.
+ * 
+ * Features:
+ * - Full 25 TxDOT District awareness (e.g. '12 - HOUSTON', 'Houston', '12') to prevent
+ *   state-spanning routes (US 90, IH 10, IH 35, etc.) from resolving in the wrong district.
+ * - Multi-segment roadway geometry matching: searches all roadway segments by DFO to
+ *   avoid clamping to the first statewide segment.
+ * - Targeted Reference Marker lookup with district and marker-range fallback.
+ * - Multi-level persistent caching in IndexedDB (v2).
  */
 
 import { get, set } from 'idb-keyval';
 
 const RM_FEATURE_SERVER = 'https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Reference_Markers/FeatureServer/0/query';
 const ROADWAYS_FEATURE_SERVER = 'https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Roadways/FeatureServer/0/query';
-const CLOUDHUB_DFO_URL = 'https://lrs-ext.us-e1.cloudhub.io/api/elrs/v1/dfo';
 
-// Storage keys for persistent caching in IndexedDB
-const GPS_CACHE_STORE_KEY = 'pmis-gis:coordinates-cache-v1';
-const RM_CACHE_STORE_KEY = 'pmis-gis:rm-cache-v1';
-const ROADWAYS_CACHE_STORE_KEY = 'pmis-gis:roadways-cache-v1';
+// Storage keys for persistent caching in IndexedDB (v2 to invalidate legacy El Paso-clamped coordinates)
+const GPS_CACHE_STORE_KEY = 'pmis-gis:coordinates-cache-v2';
+const RM_CACHE_STORE_KEY = 'pmis-gis:rm-cache-v2';
+const ROADWAYS_CACHE_STORE_KEY = 'pmis-gis:roadways-cache-v2';
 
 // In-memory caches for instant access
-const cacheRM = new Map();       // key: paddedRoute (e.g. 'SH0225') -> Array of RM features
-const cacheRoadways = new Map(); // key: routeId (e.g. 'SH0225-RG') -> Feature with paths [ [lon, lat, m], ... ]
-const memoryGpsCache = new Map(); // key: route:beginRef:endRef -> full coordinates object
+const cacheRM = new Map();       // key: paddedRoute[:district] -> Array of RM features
+const cacheRoadways = new Map(); // key: routeId (e.g. 'SH0225-RG') -> Array of Features with paths [ [lon, lat, m], ... ]
+const memoryGpsCache = new Map(); // key: route:beginRef:endRef:district:county -> full coordinates object
 
 let isGpsCacheHydrated = false;
-let isRmCacheHydrated = false;
-let isRoadwaysCacheHydrated = false;
+
+// ── TxDOT District Mapping & Normalization ───────────────────────────────────
+
+export const TXDOT_DISTRICT_NAMES = {
+  1: 'Paris', '01': 'Paris', 'PARIS': 'Paris', 'PAR': 'Paris',
+  2: 'Fort Worth', '02': 'Fort Worth', 'FORT WORTH': 'Fort Worth', 'FT WORTH': 'Fort Worth', 'FTW': 'Fort Worth',
+  3: 'Wichita Falls', '03': 'Wichita Falls', 'WICHITA FALLS': 'Wichita Falls', 'WFS': 'Wichita Falls',
+  4: 'Amarillo', '04': 'Amarillo', 'AMARILLO': 'Amarillo', 'AMA': 'Amarillo',
+  5: 'Lubbock', '05': 'Lubbock', 'LUBBOCK': 'Lubbock', 'LBB': 'Lubbock',
+  6: 'Odessa', '06': 'Odessa', 'ODESSA': 'Odessa', 'ODA': 'Odessa',
+  7: 'San Angelo', '07': 'San Angelo', 'SAN ANGELO': 'San Angelo', 'SJT': 'San Angelo',
+  8: 'Abilene', '08': 'Abilene', 'ABILENE': 'Abilene', 'ABL': 'Abilene',
+  9: 'Waco', '09': 'Waco', 'WACO': 'Waco', 'WAC': 'Waco',
+  10: 'Tyler', '10': 'Tyler', 'TYLER': 'Tyler', 'TYL': 'Tyler',
+  11: 'Lufkin', '11': 'Lufkin', 'LUFKIN': 'Lufkin', 'LFK': 'Lufkin',
+  12: 'Houston', '12': 'Houston', 'HOUSTON': 'Houston', 'HOU': 'Houston',
+  13: 'Yoakum', '13': 'Yoakum', 'YOAKUM': 'Yoakum', 'YKM': 'Yoakum',
+  14: 'Austin', '14': 'Austin', 'AUSTIN': 'Austin', 'AUS': 'Austin',
+  15: 'San Antonio', '15': 'San Antonio', 'SAN ANTONIO': 'San Antonio', 'SAT': 'San Antonio',
+  16: 'Corpus Christi', '16': 'Corpus Christi', 'CORPUS CHRISTI': 'Corpus Christi', 'CRP': 'Corpus Christi',
+  17: 'Bryan', '17': 'Bryan', 'BRYAN': 'Bryan', 'BRY': 'Bryan',
+  18: 'Dallas', '18': 'Dallas', 'DALLAS': 'Dallas', 'DAL': 'Dallas',
+  19: 'Atlanta', '19': 'Atlanta', 'ATLANTA': 'Atlanta', 'ATL': 'Atlanta',
+  20: 'Beaumont', '20': 'Beaumont', 'BEAUMONT': 'Beaumont', 'BMT': 'Beaumont',
+  21: 'Pharr', '21': 'Pharr', 'PHARR': 'Pharr', 'PHR': 'Pharr',
+  22: 'Laredo', '22': 'Laredo', 'LAREDO': 'Laredo', 'LRD': 'Laredo',
+  23: 'Brownwood', '23': 'Brownwood', 'BROWNWOOD': 'Brownwood', 'BWD': 'Brownwood',
+  24: 'El Paso', '24': 'El Paso', 'EL PASO': 'El Paso', 'ELP': 'El Paso',
+  25: 'Childress', '25': 'Childress', 'CHILDRESS': 'Childress', 'CHS': 'Childress',
+};
+
+/**
+ * Converts any raw district input (e.g. '12 - HOUSTON', '12', 'Houston', 'HOU')
+ * into the exact official TxDOT GIS district name (e.g. 'Houston').
+ */
+export function getCanonicalTxDotDistrict(raw) {
+  if (!raw) return null;
+  const str = String(raw).trim().toUpperCase();
+  if (TXDOT_DISTRICT_NAMES[str]) return TXDOT_DISTRICT_NAMES[str];
+
+  // Try matching leading numbers e.g. "12 - HOUSTON" or "12"
+  const numMatch = str.match(/^0*(\d+)/);
+  if (numMatch && TXDOT_DISTRICT_NAMES[numMatch[1]]) {
+    return TXDOT_DISTRICT_NAMES[numMatch[1]];
+  }
+
+  // Substring match
+  for (const [k, v] of Object.entries(TXDOT_DISTRICT_NAMES)) {
+    if (isNaN(Number(k)) && k.length > 2 && str.includes(k)) {
+      return v;
+    }
+  }
+  return null;
+}
+
+/**
+ * Cleans county strings for comparison (e.g. 'Harris County' -> 'Harris')
+ */
+export function cleanCountyString(raw) {
+  if (!raw) return '';
+  return String(raw).replace(/\bcounty\b/gi, '').trim();
+}
+
+/**
+ * Approximate bounding boxes for sanity-checking coordinates against district
+ */
+export const DISTRICT_BOUNDS = {
+  'Houston':        { minLon: -96.6, maxLon: -94.2, minLat: 28.6, maxLat: 30.8 },
+  'El Paso':        { minLon: -107.0, maxLon: -103.5, minLat: 29.0, maxLat: 32.5 },
+  'Beaumont':       { minLon: -95.0, maxLon: -93.5, minLat: 29.5, maxLat: 31.5 },
+  'San Antonio':    { minLon: -100.5, maxLon: -97.5, minLat: 28.5, maxLat: 30.5 },
+  'Austin':         { minLon: -99.0, maxLon: -96.5, minLat: 29.5, maxLat: 31.2 },
+  'Dallas':         { minLon: -97.5, maxLon: -96.0, minLat: 32.0, maxLat: 33.5 },
+  'Fort Worth':     { minLon: -98.5, maxLon: -96.8, minLat: 32.0, maxLat: 33.6 },
+  'Lubbock':        { minLon: -103.5, maxLon: -100.5, minLat: 32.5, maxLat: 34.5 },
+  'Amarillo':       { minLon: -103.2, maxLon: -100.0, minLat: 34.5, maxLat: 36.6 },
+  'Corpus Christi': { minLon: -98.5, maxLon: -96.8, minLat: 26.8, maxLat: 28.8 },
+  'Pharr':          { minLon: -99.0, maxLon: -97.0, minLat: 25.8, maxLat: 27.5 },
+  'Laredo':         { minLon: -101.0, maxLon: -98.8, minLat: 26.8, maxLat: 29.8 },
+  'Odessa':         { minLon: -104.5, maxLon: -101.5, minLat: 30.5, maxLat: 32.8 },
+  'Waco':           { minLon: -98.5, maxLon: -96.5, minLat: 30.8, maxLat: 32.3 },
+  'Bryan':          { minLon: -97.5, maxLon: -95.5, minLat: 30.0, maxLat: 31.5 },
+  'Tyler':          { minLon: -96.0, maxLon: -94.5, minLat: 31.8, maxLat: 33.0 },
+  'Yoakum':         { minLon: -98.0, maxLon: -95.8, minLat: 28.5, maxLat: 30.2 },
+};
+
+/**
+ * Checks whether a given [lat, lon] coordinate plausibly belongs to the district.
+ */
+export function isCoordinateInDistrict(coord, districtName) {
+  if (!coord || !Array.isArray(coord) || coord.length < 2 || !districtName) return true;
+  const bounds = DISTRICT_BOUNDS[districtName];
+  if (!bounds) return true;
+  const [lat, lon] = coord;
+  return lat >= bounds.minLat - 0.35 && lat <= bounds.maxLat + 0.35 &&
+         lon >= bounds.minLon - 0.35 && lon <= bounds.maxLon + 0.35;
+}
+
+// ── Highway Route Normalization ──────────────────────────────────────────────
 
 /**
  * Normalizes highway strings into TxDOT LRS standard format.
@@ -55,61 +159,126 @@ export function normalizeTxDOTRoute(highwayStr) {
   };
 }
 
+// ── Reference Markers Service ────────────────────────────────────────────────
+
 /**
- * Query reference markers for a given padded route (e.g. 'SH0225') from TxDOT ArcGIS Online.
- * Persists in IndexedDB so requests are only made once per route.
+ * Query reference markers for a given route, with priority given to the section's district,
+ * county, and reference marker numbers.
  */
-async function fetchReferenceMarkersForRoute(paddedRoute) {
-  if (cacheRM.has(paddedRoute)) {
-    return cacheRM.get(paddedRoute);
+async function fetchReferenceMarkersForRoute(paddedRoute, canonicalDistrict = null, cleanCounty = null, beginRef = null, endRef = null) {
+  const cacheKey = canonicalDistrict ? `${paddedRoute}:${canonicalDistrict}` : paddedRoute;
+  if (cacheRM.has(cacheKey)) {
+    return cacheRM.get(cacheKey);
   }
 
   // Check persistent storage
   try {
     const idbStore = (await get(RM_CACHE_STORE_KEY)) || {};
-    if (idbStore[paddedRoute] && Array.isArray(idbStore[paddedRoute])) {
-      cacheRM.set(paddedRoute, idbStore[paddedRoute]);
-      return idbStore[paddedRoute];
+    if (idbStore[cacheKey] && Array.isArray(idbStore[cacheKey])) {
+      cacheRM.set(cacheKey, idbStore[cacheKey]);
+      return idbStore[cacheKey];
     }
   } catch {
     // Ignore idb errors and fallback to fetch
   }
 
-  const params = new URLSearchParams({
+  // Strategy 1: Query targeted by District
+  if (canonicalDistrict) {
+    const params = new URLSearchParams({
+      where: `RTE_NM LIKE '${paddedRoute}%' AND DIST_NM = '${canonicalDistrict}'`,
+      outFields: 'OBJECTID,RTE_NM,RTE_PRFX,RTE_NBR,RDBD_TYPE,DFO,MRKR_NBR,MRKR_SFX,CNTY_NM,DIST_NM',
+      orderByFields: 'MRKR_NBR ASC, DFO ASC',
+      returnGeometry: 'true',
+      outSR: '4326',
+      resultRecordCount: '2000',
+      f: 'pjson'
+    });
+
+    try {
+      const res = await fetch(`${RM_FEATURE_SERVER}?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        const features = data.features || [];
+        if (features.length > 0) {
+          cacheRM.set(cacheKey, features);
+          try {
+            const idbStore = (await get(RM_CACHE_STORE_KEY)) || {};
+            idbStore[cacheKey] = features;
+            await set(RM_CACHE_STORE_KEY, idbStore);
+          } catch {}
+          return features;
+        }
+      }
+    } catch (err) {
+      console.warn(`[txdotGisApi] District query failed for ${paddedRoute} in ${canonicalDistrict}:`, err);
+    }
+  }
+
+  // Strategy 2: Query targeted by Reference Marker range (prevents truncating state-spanning routes)
+  if (beginRef !== null && endRef !== null && !isNaN(beginRef) && !isNaN(endRef)) {
+    const minM = Math.floor(Math.min(beginRef, endRef)) - 10;
+    const maxM = Math.ceil(Math.max(beginRef, endRef)) + 10;
+    const params = new URLSearchParams({
+      where: `RTE_NM LIKE '${paddedRoute}%' AND MRKR_NBR >= ${minM} AND MRKR_NBR <= ${maxM}`,
+      outFields: 'OBJECTID,RTE_NM,RTE_PRFX,RTE_NBR,RDBD_TYPE,DFO,MRKR_NBR,MRKR_SFX,CNTY_NM,DIST_NM',
+      orderByFields: 'MRKR_NBR ASC, DFO ASC',
+      returnGeometry: 'true',
+      outSR: '4326',
+      resultRecordCount: '2000',
+      f: 'pjson'
+    });
+
+    try {
+      const res = await fetch(`${RM_FEATURE_SERVER}?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        const features = data.features || [];
+        if (features.length > 0) {
+          cacheRM.set(cacheKey, features);
+          return features;
+        }
+      }
+    } catch (err) {
+      console.warn(`[txdotGisApi] Marker range query failed for ${paddedRoute} [${beginRef}-${endRef}]:`, err);
+    }
+  }
+
+  // Strategy 3: Broad query (all markers for the route)
+  const broadParams = new URLSearchParams({
     where: `RTE_NM LIKE '${paddedRoute}%'`,
     outFields: 'OBJECTID,RTE_NM,RTE_PRFX,RTE_NBR,RDBD_TYPE,DFO,MRKR_NBR,MRKR_SFX,CNTY_NM,DIST_NM',
     orderByFields: 'MRKR_NBR ASC, DFO ASC',
     returnGeometry: 'true',
     outSR: '4326',
+    resultRecordCount: '2000',
     f: 'pjson'
   });
 
   try {
-    const res = await fetch(`${RM_FEATURE_SERVER}?${params.toString()}`);
+    const res = await fetch(`${RM_FEATURE_SERVER}?${broadParams.toString()}`);
     if (!res.ok) throw new Error(`HTTP error ${res.status}`);
     const data = await res.json();
     const features = data.features || [];
-    cacheRM.set(paddedRoute, features);
+    cacheRM.set(cacheKey, features);
 
-    // Persist to IndexedDB
     try {
       const idbStore = (await get(RM_CACHE_STORE_KEY)) || {};
-      idbStore[paddedRoute] = features;
+      idbStore[cacheKey] = features;
       await set(RM_CACHE_STORE_KEY, idbStore);
-    } catch {
-      // Ignore idb save errors
-    }
+    } catch {}
 
     return features;
   } catch (err) {
-    console.warn(`[txdotGisApi] Failed to fetch Reference Markers for ${paddedRoute}:`, err);
+    console.warn(`[txdotGisApi] Broad query failed for Reference Markers for ${paddedRoute}:`, err);
     return [];
   }
 }
 
+// ── Roadways Geometry Service (Multi-Feature Aware) ──────────────────────────
+
 /**
- * Query measured roadway linework (with DFO measures) for a specific route ID (e.g. 'SH0225-RG').
- * Persists in IndexedDB.
+ * Query ALL measured roadway linework features for a specific route ID (e.g. 'US0090-RG').
+ * Preserves all statewide segments and indexes them by DFO range.
  */
 async function fetchRoadwayGeometryForRoute(routeId) {
   if (cacheRoadways.has(routeId)) {
@@ -119,7 +288,7 @@ async function fetchRoadwayGeometryForRoute(routeId) {
   // Check persistent storage
   try {
     const idbStore = (await get(ROADWAYS_CACHE_STORE_KEY)) || {};
-    if (idbStore[routeId]) {
+    if (idbStore[routeId] && Array.isArray(idbStore[routeId])) {
       cacheRoadways.set(routeId, idbStore[routeId]);
       return idbStore[routeId];
     }
@@ -129,10 +298,11 @@ async function fetchRoadwayGeometryForRoute(routeId) {
 
   const params = new URLSearchParams({
     where: `RTE_NM = '${routeId}'`,
-    outFields: 'RTE_NM,RDBD_TYPE,BEGIN_DFO,END_DFO,COUNTY',
+    outFields: 'OBJECTID,RTE_NM,RDBD_TYPE,BEGIN_DFO,END_DFO,COUNTY',
     returnGeometry: 'true',
     returnM: 'true',
     outSR: '4326',
+    resultRecordCount: '2000',
     f: 'pjson'
   });
 
@@ -140,86 +310,143 @@ async function fetchRoadwayGeometryForRoute(routeId) {
     const res = await fetch(`${ROADWAYS_FEATURE_SERVER}?${params.toString()}`);
     if (!res.ok) throw new Error(`HTTP error ${res.status}`);
     const data = await res.json();
-    const feat = data.features?.[0] || null;
-    cacheRoadways.set(routeId, feat);
+    const features = data.features || [];
+    cacheRoadways.set(routeId, features);
 
-    // Persist to IndexedDB
-    if (feat) {
+    if (features.length > 0) {
       try {
         const idbStore = (await get(ROADWAYS_CACHE_STORE_KEY)) || {};
-        idbStore[routeId] = feat;
+        idbStore[routeId] = features;
         await set(ROADWAYS_CACHE_STORE_KEY, idbStore);
-      } catch {
-        // Ignore idb save errors
-      }
+      } catch {}
     }
 
-    return feat;
+    return features;
   } catch (err) {
-    console.warn(`[txdotGisApi] Failed to fetch Roadway geometry for ${routeId}:`, err);
-    return null;
+    console.warn(`[txdotGisApi] Failed to fetch Roadway geometries for ${routeId}:`, err);
+    return [];
   }
 }
 
 /**
- * Interpolate a point [lat, lon] at a specific DFO along a roadway polyline.
- * paths: Array of [lon, lat, m]
+ * Selects the best roadway feature among multiple segments for a target DFO.
  */
-function interpolatePointAtDfo(paths, targetDfo) {
+function findRoadwayFeatureForDfo(roadwayFeatures, targetDfo) {
+  if (!roadwayFeatures || roadwayFeatures.length === 0) return null;
+
+  // 1. Direct containment: BEGIN_DFO <= targetDfo <= END_DFO
+  for (const feat of roadwayFeatures) {
+    const b = feat.attributes.BEGIN_DFO;
+    const e = feat.attributes.END_DFO;
+    const minD = Math.min(b, e);
+    const maxD = Math.max(b, e);
+    if (targetDfo >= minD && targetDfo <= maxD) {
+      return feat;
+    }
+  }
+
+  // 2. Proximity tolerance (within 5.0 miles of a segment)
+  let closest = null;
+  let minDiff = Infinity;
+  for (const feat of roadwayFeatures) {
+    const b = feat.attributes.BEGIN_DFO;
+    const e = feat.attributes.END_DFO;
+    const minD = Math.min(b, e);
+    const maxD = Math.max(b, e);
+    const diff = Math.min(Math.abs(targetDfo - minD), Math.abs(targetDfo - maxD));
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = feat;
+    }
+  }
+
+  return minDiff <= 5.0 ? closest : null;
+}
+
+/**
+ * Interpolate a point [lat, lon] at a specific DFO along a roadway polyline or feature.
+ */
+function interpolatePointAtDfo(featOrPaths, targetDfo) {
+  if (!featOrPaths) return null;
+  const paths = Array.isArray(featOrPaths) ? featOrPaths : featOrPaths.geometry?.paths;
   if (!paths || paths.length === 0) return null;
 
-  // Flatten if multi-part
   const vertices = paths[0] || paths;
   if (!vertices || vertices.length === 0) return null;
 
-  // Check bounds
   const firstM = vertices[0][2];
   const lastM = vertices[vertices.length - 1][2];
 
-  if (targetDfo <= firstM) {
-    return [vertices[0][1], vertices[0][0]]; // [lat, lon]
+  if (targetDfo <= Math.min(firstM, lastM)) {
+    const pt = firstM <= lastM ? vertices[0] : vertices[vertices.length - 1];
+    return [Number(pt[1].toFixed(6)), Number(pt[0].toFixed(6))];
   }
-  if (targetDfo >= lastM) {
-    const last = vertices[vertices.length - 1];
-    return [last[1], last[0]]; // [lat, lon]
+  if (targetDfo >= Math.max(firstM, lastM)) {
+    const pt = firstM >= lastM ? vertices[0] : vertices[vertices.length - 1];
+    return [Number(pt[1].toFixed(6)), Number(pt[0].toFixed(6))];
   }
 
-  // Find surrounding segment
   for (let i = 0; i < vertices.length - 1; i++) {
     const p1 = vertices[i];
     const p2 = vertices[i + 1];
-    const m1 = p1[2];
-    const m2 = p2[2];
-
-    const minM = Math.min(m1, m2);
-    const maxM = Math.max(m1, m2);
+    const minM = Math.min(p1[2], p2[2]);
+    const maxM = Math.max(p1[2], p2[2]);
 
     if (targetDfo >= minM && targetDfo <= maxM) {
-      const denom = (m2 - m1) || 0.000001;
-      const ratio = (targetDfo - m1) / denom;
+      const denom = (p2[2] - p1[2]) || 0.000001;
+      const ratio = (targetDfo - p1[2]) / denom;
       const lat = p1[1] + ratio * (p2[1] - p1[1]);
       const lon = p1[0] + ratio * (p2[0] - p1[0]);
       return [Number(lat.toFixed(6)), Number(lon.toFixed(6))];
     }
   }
 
-  return [vertices[0][1], vertices[0][0]];
+  return [Number(vertices[0][1].toFixed(6)), Number(vertices[0][0].toFixed(6))];
 }
 
 /**
- * Extract a polyline segment between beginDfo and endDfo.
- * Returns array of [lat, lon] points.
+ * Extract a polyline segment between beginDfo and endDfo across roadway features.
  */
-function extractPathBetweenDfos(paths, beginDfo, endDfo) {
-  if (!paths || paths.length === 0) return [];
-  const vertices = paths[0] || paths;
+function extractPathBetweenDfosFromFeatures(roadwayFeatures, beginDfo, endDfo) {
+  if (!roadwayFeatures || roadwayFeatures.length === 0) return [];
+  const startD = Math.min(beginDfo, endDfo);
+  const stopD = Math.max(beginDfo, endDfo);
+
+  // Find all features overlapping [startD, stopD]
+  const overlapping = roadwayFeatures.filter(f => {
+    const b = Math.min(f.attributes.BEGIN_DFO, f.attributes.END_DFO);
+    const e = Math.max(f.attributes.BEGIN_DFO, f.attributes.END_DFO);
+    return !(e < startD || b > stopD);
+  }).sort((a, b) => a.attributes.BEGIN_DFO - b.attributes.BEGIN_DFO);
+
+  if (overlapping.length === 0) {
+    const closest = findRoadwayFeatureForDfo(roadwayFeatures, (startD + stopD) / 2);
+    if (!closest) return [];
+    return extractPathFromSingleFeature(closest, beginDfo, endDfo);
+  }
+
+  const combined = [];
+  for (const feat of overlapping) {
+    const seg = extractPathFromSingleFeature(feat, startD, stopD);
+    combined.push(...seg);
+  }
+
+  if (beginDfo > endDfo) {
+    combined.reverse();
+  }
+  return combined;
+}
+
+function extractPathFromSingleFeature(feat, beginDfo, endDfo) {
+  if (!feat || !feat.geometry?.paths) return [];
+  const vertices = feat.geometry.paths[0];
   if (!vertices || vertices.length === 0) return [];
 
   const startD = Math.min(beginDfo, endDfo);
   const stopD = Math.max(beginDfo, endDfo);
 
-  const startPt = interpolatePointAtDfo(paths, startD);
-  const endPt = interpolatePointAtDfo(paths, stopD);
+  const startPt = interpolatePointAtDfo(vertices, startD);
+  const endPt = interpolatePointAtDfo(vertices, stopD);
 
   const segment = [];
   if (startPt) segment.push(startPt);
@@ -232,18 +459,16 @@ function extractPathBetweenDfos(paths, beginDfo, endDfo) {
   }
 
   if (endPt) segment.push(endPt);
-
-  // If start and end were inverted, reverse
   if (beginDfo > endDfo) {
     segment.reverse();
   }
-
   return segment;
 }
 
+// ── DFO Interpolation from Reference Markers ─────────────────────────────────
+
 /**
- * Calculate DFO for a given reference marker value (e.g. 690.500)
- * using the list of reference markers for that roadbed.
+ * Calculate DFO for a given reference marker value using the list of markers.
  */
 function calculateDfoFromRefMarker(markerList, targetRef) {
   if (!markerList || markerList.length === 0) return null;
@@ -281,7 +506,7 @@ function calculateDfoFromRefMarker(markerList, targetRef) {
   }
 
   if (prevMarker) {
-    // Extrapolate forward: DFO = prev.dfo + (displacement in miles)
+    // Extrapolate forward
     return prevMarker.dfo + (numRef - prevMarker.marker);
   }
 
@@ -293,55 +518,74 @@ function calculateDfoFromRefMarker(markerList, targetRef) {
   return null;
 }
 
+// ── Roadbed Resolver ─────────────────────────────────────────────────────────
+
 /**
  * Resolves coordinates for a single roadbed ('R' or 'L') for a given section.
+ * Enforces district and county constraints to prevent jumping across Texas.
  */
-async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, endRef, allMarkers) {
-  // Roadbed types to look for in TxDOT Reference Markers:
-  // For R: look for 'RG' (Right General). If not found, look for 'KG' (Undivided).
-  // For L: look for 'LG' (Left General). If not found, look for 'KG' (Undivided).
+async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, endRef, allMarkers, canonicalDist = null, cleanCounty = null) {
   const primaryType = roadbedLetter === 'L' ? 'LG' : 'RG';
-  
-  let markers = allMarkers.filter(f => f.attributes.RDBD_TYPE === primaryType)
-    .map(f => ({
+
+  // Helper to extract clean marker records
+  const extractRecords = (features) => {
+    return features.map(f => ({
       marker: f.attributes.MRKR_NBR,
       dfo: f.attributes.DFO,
       lat: f.geometry?.y,
       lon: f.geometry?.x,
       route: f.attributes.RTE_NM,
       county: f.attributes.CNTY_NM,
-    }))
-    .sort((a, b) => a.marker - b.marker);
+      district: f.attributes.DIST_NM,
+      type: f.attributes.RDBD_TYPE,
+    })).sort((a, b) => a.marker - b.marker);
+  };
 
+  // Filter markers by roadbed type
+  let typeFiltered = allMarkers.filter(f => f.attributes.RDBD_TYPE === primaryType);
   let isUndivided = false;
-  if (markers.length === 0) {
-    // Try KG (Single / Undivided roadbed)
-    markers = allMarkers.filter(f => f.attributes.RDBD_TYPE === 'KG')
-      .map(f => ({
-        marker: f.attributes.MRKR_NBR,
-        dfo: f.attributes.DFO,
-        lat: f.geometry?.y,
-        lon: f.geometry?.x,
-        route: f.attributes.RTE_NM,
-        county: f.attributes.CNTY_NM,
-      }))
-      .sort((a, b) => a.marker - b.marker);
 
-    if (markers.length > 0) {
+  if (typeFiltered.length === 0) {
+    typeFiltered = allMarkers.filter(f => f.attributes.RDBD_TYPE === 'KG');
+    if (typeFiltered.length > 0) {
       isUndivided = true;
     }
   }
 
-  if (markers.length === 0) {
+  if (typeFiltered.length === 0) {
     return {
       available: false,
       error: `No Reference Markers found for roadbed ${roadbedLetter} on ${paddedRoute}`,
     };
   }
 
+  let candidateMarkers = extractRecords(typeFiltered);
+
+  // If district is known, prioritize district markers
+  if (canonicalDist) {
+    const distMatches = candidateMarkers.filter(m => m.district && m.district.toLowerCase() === canonicalDist.toLowerCase());
+    if (distMatches.length > 0) {
+      candidateMarkers = distMatches;
+    }
+  }
+
+  // If county is known and markers exist in county, prioritize county markers
+  if (cleanCounty) {
+    const countyLower = cleanCounty.toLowerCase();
+    const countyMatches = candidateMarkers.filter(m => m.county && m.county.toLowerCase() === countyLower);
+    if (countyMatches.length > 0) {
+      const minM = Math.min(...countyMatches.map(m => m.marker));
+      const maxM = Math.max(...countyMatches.map(m => m.marker));
+      // Only restrict if section markers are within or near county range
+      if (beginRef >= minM - 10 && endRef <= maxM + 10) {
+        candidateMarkers = countyMatches;
+      }
+    }
+  }
+
   // Calculate DFOs
-  const beginDfo = calculateDfoFromRefMarker(markers, beginRef);
-  const endDfo = calculateDfoFromRefMarker(markers, endRef);
+  const beginDfo = calculateDfoFromRefMarker(candidateMarkers, beginRef);
+  const endDfo = calculateDfoFromRefMarker(candidateMarkers, endRef);
 
   if (beginDfo === null || endDfo === null) {
     return {
@@ -350,26 +594,32 @@ async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, e
     };
   }
 
-  // Query Roadway polyline linework with measures
+  // Query Roadway features for this roadbed route ID
   const targetRouteId = isUndivided ? `${paddedRoute}-KG` : `${paddedRoute}-${primaryType}`;
-  const roadwayFeat = await fetchRoadwayGeometryForRoute(targetRouteId);
+  const roadwayFeatures = await fetchRoadwayGeometryForRoute(targetRouteId);
 
   let beginCoord = null;
   let endCoord = null;
   let path = [];
 
-  if (roadwayFeat && roadwayFeat.geometry?.paths) {
-    const rawPaths = roadwayFeat.geometry.paths;
-    beginCoord = interpolatePointAtDfo(rawPaths, beginDfo);
-    endCoord = interpolatePointAtDfo(rawPaths, endDfo);
-    path = extractPathBetweenDfos(rawPaths, beginDfo, endDfo);
+  if (roadwayFeatures && roadwayFeatures.length > 0) {
+    const featBegin = findRoadwayFeatureForDfo(roadwayFeatures, beginDfo);
+    const featEnd = findRoadwayFeatureForDfo(roadwayFeatures, endDfo);
+
+    if (featBegin) {
+      beginCoord = interpolatePointAtDfo(featBegin, beginDfo);
+    }
+    if (featEnd) {
+      endCoord = interpolatePointAtDfo(featEnd, endDfo);
+    }
+
+    path = extractPathBetweenDfosFromFeatures(roadwayFeatures, beginDfo, endDfo);
   }
 
-  // Fallback if roadway geometry was unavailable or incomplete: interpolate between reference marker points directly
+  // Fallback: interpolate directly between the candidate reference marker points
   if (!beginCoord || !endCoord) {
-    // Find closest markers
     const findClosestPoint = (targetRef) => {
-      const sorted = [...markers].sort((a, b) => Math.abs(a.marker - targetRef) - Math.abs(b.marker - targetRef));
+      const sorted = [...candidateMarkers].sort((a, b) => Math.abs(a.marker - targetRef) - Math.abs(b.marker - targetRef));
       if (sorted.length >= 2) {
         const m1 = sorted[0];
         const m2 = sorted[1];
@@ -388,6 +638,21 @@ async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, e
     path = [beginCoord, endCoord];
   }
 
+  // Sanity check against district bounds
+  if (canonicalDist) {
+    if (!isCoordinateInDistrict(beginCoord, canonicalDist) || !isCoordinateInDistrict(endCoord, canonicalDist)) {
+      console.warn(`[txdotGisApi] Warning: Coordinates [${beginCoord}] fall outside ${canonicalDist} district bounds. Retrying with marker fallback.`);
+      // Force fallback to candidate markers directly
+      if (candidateMarkers.length > 0) {
+        const sorted = [...candidateMarkers].sort((a, b) => Math.abs(a.marker - beginRef) - Math.abs(b.marker - beginRef));
+        beginCoord = [Number(sorted[0].lat.toFixed(6)), Number(sorted[0].lon.toFixed(6))];
+        const sortedEnd = [...candidateMarkers].sort((a, b) => Math.abs(a.marker - endRef) - Math.abs(b.marker - endRef));
+        endCoord = [Number(sortedEnd[0].lat.toFixed(6)), Number(sortedEnd[0].lon.toFixed(6))];
+        path = [beginCoord, endCoord];
+      }
+    }
+  }
+
   return {
     available: true,
     isUndivided,
@@ -403,15 +668,16 @@ async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, e
 
 // ── Persistent GPS Coordinates Cache ─────────────────────────────────────────
 
-export function getSectionGpsKey(highway, beginRef, endRef, county = '') {
+export function getSectionGpsKey(highway, beginRef, endRef, county = '', district = '') {
   const norm = normalizeTxDOTRoute(highway);
   const route = norm ? norm.paddedRoute : String(highway || '').trim().toUpperCase();
   const b = parseFloat(beginRef);
   const e = parseFloat(endRef);
   const bStr = !isNaN(b) ? b.toFixed(3) : String(beginRef ?? '').trim();
   const eStr = !isNaN(e) ? e.toFixed(3) : String(endRef ?? '').trim();
-  const cStr = String(county || '').trim().toLowerCase();
-  return `${route}:${bStr}:${eStr}${cStr ? `:${cStr}` : ''}`;
+  const cStr = cleanCountyString(county).toLowerCase();
+  const dStr = String(getCanonicalTxDotDistrict(district) || district || '').trim().toLowerCase();
+  return `${route}:${bStr}:${eStr}${dStr ? `:${dStr}` : ''}${cStr ? `:${cStr}` : ''}`;
 }
 
 /**
@@ -440,16 +706,19 @@ export async function saveCoordinatesToCache(section, coordinates) {
   if (!section || !coordinates || coordinates.status !== 'success') return;
   await initGpsCache();
 
-  const keyWithCounty = getSectionGpsKey(section.highway, section.beginRef, section.endRef, section.countyName);
-  const fallbackKey = getSectionGpsKey(section.highway, section.beginRef, section.endRef);
+  const keyFull = getSectionGpsKey(section.highway, section.beginRef, section.endRef, section.countyName, section.district);
+  const keyDist = getSectionGpsKey(section.highway, section.beginRef, section.endRef, '', section.district);
+  const keyCounty = getSectionGpsKey(section.highway, section.beginRef, section.endRef, section.countyName, '');
 
-  memoryGpsCache.set(keyWithCounty, coordinates);
-  memoryGpsCache.set(fallbackKey, coordinates);
+  memoryGpsCache.set(keyFull, coordinates);
+  memoryGpsCache.set(keyDist, coordinates);
+  memoryGpsCache.set(keyCounty, coordinates);
 
   try {
     const existing = (await get(GPS_CACHE_STORE_KEY)) || {};
-    existing[keyWithCounty] = coordinates;
-    existing[fallbackKey] = coordinates;
+    existing[keyFull] = coordinates;
+    existing[keyDist] = coordinates;
+    existing[keyCounty] = coordinates;
     await set(GPS_CACHE_STORE_KEY, existing);
   } catch (err) {
     console.warn('[txdotGisApi] Failed to save GPS to IndexedDB:', err);
@@ -467,12 +736,12 @@ export async function batchSaveCoordinatesToCache(sectionsWithCoordinates) {
     const existing = (await get(GPS_CACHE_STORE_KEY)) || {};
     sectionsWithCoordinates.forEach(s => {
       if (s.coordinates?.status === 'success') {
-        const keyWithCounty = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName);
-        const fallbackKey = getSectionGpsKey(s.highway, s.beginRef, s.endRef);
-        memoryGpsCache.set(keyWithCounty, s.coordinates);
-        memoryGpsCache.set(fallbackKey, s.coordinates);
-        existing[keyWithCounty] = s.coordinates;
-        existing[fallbackKey] = s.coordinates;
+        const keyFull = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName, s.district);
+        const keyDist = getSectionGpsKey(s.highway, s.beginRef, s.endRef, '', s.district);
+        memoryGpsCache.set(keyFull, s.coordinates);
+        memoryGpsCache.set(keyDist, s.coordinates);
+        existing[keyFull] = s.coordinates;
+        existing[keyDist] = s.coordinates;
       }
     });
     await set(GPS_CACHE_STORE_KEY, existing);
@@ -483,10 +752,8 @@ export async function batchSaveCoordinatesToCache(sectionsWithCoordinates) {
 
 /**
  * Hydrates sections with coordinates from persistent cache if missing.
- * Ensures previously generated GPS coordinates are automatically restored.
- * 
- * @param {Array<Object>} sections
- * @returns {Promise<{ sections: Array<Object>, hasUpdates: boolean }>}
+ * Ensures previously generated GPS coordinates are automatically restored,
+ * while rejecting legacy bad coordinates that fall outside the section's district.
  */
 export async function hydrateSectionsWithCachedCoordinates(sections) {
   if (!Array.isArray(sections) || sections.length === 0) return { sections: [], hasUpdates: false };
@@ -494,9 +761,20 @@ export async function hydrateSectionsWithCachedCoordinates(sections) {
 
   let hasUpdates = false;
   const updated = sections.map(s => {
-    // If section already has valid coordinates, ensure they are cached
+    const canonicalDist = getCanonicalTxDotDistrict(s.district);
+
+    // If section already has coordinates, verify they are in the district
     if (s.coordinates?.status === 'success' && (s.coordinates.R?.available || s.coordinates.L?.available)) {
-      const key = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName);
+      const coord = s.coordinates.R?.begin || s.coordinates.L?.begin;
+      if (canonicalDist && !isCoordinateInDistrict(coord, canonicalDist)) {
+        // Stale El Paso coordinate for Houston/Dallas section: invalidate so it re-generates!
+        hasUpdates = true;
+        return {
+          ...s,
+          coordinates: null,
+        };
+      }
+      const key = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName, s.district);
       if (!memoryGpsCache.has(key)) {
         memoryGpsCache.set(key, s.coordinates);
       }
@@ -504,16 +782,19 @@ export async function hydrateSectionsWithCachedCoordinates(sections) {
     }
 
     // Look up in persistent cache
-    const keyWithCounty = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName);
-    const fallbackKey = getSectionGpsKey(s.highway, s.beginRef, s.endRef);
-    const cached = memoryGpsCache.get(keyWithCounty) || memoryGpsCache.get(fallbackKey);
+    const keyFull = getSectionGpsKey(s.highway, s.beginRef, s.endRef, s.countyName, s.district);
+    const keyDist = getSectionGpsKey(s.highway, s.beginRef, s.endRef, '', s.district);
+    const cached = memoryGpsCache.get(keyFull) || memoryGpsCache.get(keyDist);
 
     if (cached && cached.status === 'success') {
-      hasUpdates = true;
-      return {
-        ...s,
-        coordinates: cached,
-      };
+      const coord = cached.R?.begin || cached.L?.begin;
+      if (!canonicalDist || isCoordinateInDistrict(coord, canonicalDist)) {
+        hasUpdates = true;
+        return {
+          ...s,
+          coordinates: cached,
+        };
+      }
     }
 
     return s;
@@ -522,11 +803,13 @@ export async function hydrateSectionsWithCachedCoordinates(sections) {
   return { sections: updated, hasUpdates };
 }
 
+// ── Main Coordinate Resolver ─────────────────────────────────────────────────
+
 /**
  * Resolves GPS coordinates for both R and L roadbeds for a single section object.
- * Checks persistent cache before making any network calls.
+ * Checks persistent cache before making network calls.
  * 
- * @param {Object} section - Must have .highway, .beginRef, .endRef
+ * @param {Object} section - Must have .highway, .beginRef, .endRef, optionally .district, .countyName
  * @returns {Promise<Object>} coordinates object
  */
 export async function fetchCoordinatesForSection(section) {
@@ -534,18 +817,28 @@ export async function fetchCoordinatesForSection(section) {
     return { status: 'error', error: 'Missing highway information' };
   }
 
-  // 0. If section already has valid coordinates, return directly
+  const canonicalDist = getCanonicalTxDotDistrict(section.district);
+  const cleanCounty = cleanCountyString(section.countyName);
+
+  // 0. If section already has valid coordinates and matches district, return directly
   if (section.coordinates?.status === 'success' && (section.coordinates.R?.available || section.coordinates.L?.available)) {
-    return section.coordinates;
+    const checkCoord = section.coordinates.R?.begin || section.coordinates.L?.begin;
+    if (!canonicalDist || isCoordinateInDistrict(checkCoord, canonicalDist)) {
+      return section.coordinates;
+    }
   }
 
   // 1. Check persistent cache
   await initGpsCache();
-  const keyWithCounty = getSectionGpsKey(section.highway, section.beginRef, section.endRef, section.countyName);
-  const fallbackKey = getSectionGpsKey(section.highway, section.beginRef, section.endRef);
-  const cached = memoryGpsCache.get(keyWithCounty) || memoryGpsCache.get(fallbackKey);
+  const keyFull = getSectionGpsKey(section.highway, section.beginRef, section.endRef, section.countyName, section.district);
+  const keyDist = getSectionGpsKey(section.highway, section.beginRef, section.endRef, '', section.district);
+  const cached = memoryGpsCache.get(keyFull) || memoryGpsCache.get(keyDist);
+
   if (cached && cached.status === 'success') {
-    return cached;
+    const checkCoord = cached.R?.begin || cached.L?.begin;
+    if (!canonicalDist || isCoordinateInDistrict(checkCoord, canonicalDist)) {
+      return cached;
+    }
   }
 
   const parsed = normalizeTxDOTRoute(section.highway);
@@ -559,36 +852,36 @@ export async function fetchCoordinatesForSection(section) {
     return { status: 'error', error: `Invalid reference marker range: ${section.beginRef} – ${section.endRef}` };
   }
 
-  // 2. Fetch Reference Markers for this highway
-  const allMarkers = await fetchReferenceMarkersForRoute(parsed.paddedRoute);
+  // 2. Fetch Reference Markers with district and marker range awareness
+  const allMarkers = await fetchReferenceMarkersForRoute(parsed.paddedRoute, canonicalDist, cleanCounty, beginRef, endRef);
   if (!allMarkers || allMarkers.length === 0) {
     return {
       status: 'not_found',
-      error: `No TxDOT Reference Markers found for ${parsed.paddedRoute}`
+      error: `No TxDOT Reference Markers found for ${parsed.paddedRoute}${canonicalDist ? ` in ${canonicalDist} District` : ''}`
     };
   }
 
-  // Filter by county if countyName is available and markers span multiple counties
-  let filteredMarkers = allMarkers;
-  if (section.countyName) {
-    const cleanCounty = String(section.countyName).trim().toLowerCase();
-    const countyMatches = allMarkers.filter(f => 
-      f.attributes.CNTY_NM && f.attributes.CNTY_NM.toLowerCase() === cleanCounty
-    );
-    if (countyMatches.length > 0) {
-      const minM = Math.min(...countyMatches.map(m => m.attributes.MRKR_NBR));
-      const maxM = Math.max(...countyMatches.map(m => m.attributes.MRKR_NBR));
-      if (beginRef >= minM - 5 && endRef <= maxM + 5) {
-        filteredMarkers = countyMatches;
-      }
-    }
-  }
-
   // 3. Resolve Roadbed R
-  const rResult = await resolveRoadbedCoordinates(parsed.paddedRoute, 'R', beginRef, endRef, filteredMarkers);
+  const rResult = await resolveRoadbedCoordinates(
+    parsed.paddedRoute,
+    'R',
+    beginRef,
+    endRef,
+    allMarkers,
+    canonicalDist,
+    cleanCounty
+  );
 
   // 4. Resolve Roadbed L
-  const lResult = await resolveRoadbedCoordinates(parsed.paddedRoute, 'L', beginRef, endRef, filteredMarkers);
+  const lResult = await resolveRoadbedCoordinates(
+    parsed.paddedRoute,
+    'L',
+    beginRef,
+    endRef,
+    allMarkers,
+    canonicalDist,
+    cleanCounty
+  );
 
   const hasAny = rResult.available || lResult.available;
 
@@ -596,6 +889,8 @@ export async function fetchCoordinatesForSection(section) {
     status: hasAny ? 'success' : 'failed',
     timestamp: new Date().toISOString(),
     highwayRoute: parsed.paddedRoute,
+    district: canonicalDist,
+    county: cleanCounty,
     R: rResult,
     L: lResult,
   };
@@ -610,8 +905,7 @@ export async function fetchCoordinatesForSection(section) {
 
 /**
  * Batch generates coordinates for a list of sections.
- * Optimized by grouping sections by highway to avoid redundant network calls,
- * and automatically persists all coordinates to IndexedDB.
+ * Automatically persists all coordinates to IndexedDB.
  * 
  * @param {Array<Object>} sections
  * @param {Function} [onProgress] - callback: ({ current, total, highway, sectionId }) => void
