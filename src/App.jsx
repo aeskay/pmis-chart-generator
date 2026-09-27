@@ -813,6 +813,7 @@ export default function App() {
                 pmisMap={pmisMap}
                 pmisLoading={pmisLoading}
                 pmisProgress={pmisProgress}
+                addToast={addToast}
               />
             )}
             {activeTab === 'charts' && (

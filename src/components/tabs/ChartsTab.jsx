@@ -62,6 +62,8 @@ export default function ChartsTab({
   const [slabThFilter, setSlabThFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' | 'desc' | 'count-desc' | 'count-asc'
   const [includeUnknown, setIncludeUnknown] = useState(true);
+  const [copyingChart, setCopyingChart] = useState(false);
+  const [copiedChart, setCopiedChart] = useState(false);
 
   const chartRef = useRef(null);
 
@@ -162,6 +164,29 @@ export default function ChartsTab({
       console.error('Failed to export construction year Excel:', err);
       if (addToast) addToast('error', 'Export Failed', err.message);
     }
+  };
+
+  // ── Copy Chart Image to Clipboard ──
+  const handleCopyChart = async () => {
+    if (!chartRef.current || copyingChart) return;
+    try {
+      setCopyingChart(true);
+      await chartRef.current.copyImage();
+      setCopiedChart(true);
+      setTimeout(() => setCopiedChart(false), 2000);
+      if (addToast) addToast('success', 'Chart Copied', 'Chart image copied to clipboard (paste into PowerPoint, Word, etc.).');
+    } catch (err) {
+      console.error('Failed to copy chart image:', err);
+      if (addToast) addToast('error', 'Copy Failed', err.message || 'Could not copy image');
+    } finally {
+      setCopyingChart(false);
+    }
+  };
+
+  // ── Download Chart as PNG ──
+  const handleDownloadPNG = () => {
+    if (!chartRef.current) return;
+    chartRef.current.download('sections_by_construction_year');
   };
 
   if (!sections.length) {
@@ -518,22 +543,11 @@ export default function ChartsTab({
             <span>Include Unspecified Years</span>
           </label>
         </div>
-
-        {/* Action: Save PNG */}
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => chartRef.current?.downloadImage('sections_by_construction_year')}
-          title="Download Construction Year Chart as High-Res PNG"
-          style={{ fontSize: '12px', padding: '4px 10px', gap: '5px' }}
-        >
-          <span>📷</span> Download PNG
-        </button>
       </div>
 
       {/* ── Main Chart Card ── */}
       <div className="chart-panel" style={{ background: '#ffffff', color: '#000000', padding: '22px', borderRadius: 'var(--radius-lg)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
           <div>
             <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#111827' }}>
               Section Distribution by Construction Year
@@ -541,6 +555,30 @@ export default function ChartsTab({
             <span style={{ fontSize: '13px', color: '#6b7280' }}>
               Pavement network age profile • Showing {yearData.totalSections} sections across {yearData.years.length} year cohorts
             </span>
+          </div>
+
+          {/* Action buttons: Copy & Download PNG */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={handleCopyChart}
+              disabled={copyingChart}
+              title="Copy chart image directly to clipboard (paste into PowerPoint, Word, etc.)"
+              style={{ gap: 5, fontSize: '12px', fontWeight: 600 }}
+            >
+              <span>{copiedChart ? '✓' : copyingChart ? '⏳' : '📋'}</span>
+              <span>{copiedChart ? 'Copied!' : copyingChart ? 'Copying…' : 'Copy'}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={handleDownloadPNG}
+              title="Download Construction Year Chart as High-Res PNG"
+              style={{ gap: 5, fontSize: '12px', fontWeight: 600 }}
+            >
+              <span>📷</span> Download PNG
+            </button>
           </div>
         </div>
 

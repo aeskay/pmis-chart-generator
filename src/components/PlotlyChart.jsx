@@ -160,7 +160,9 @@ const PlotlyChart = forwardRef(function PlotlyChart({
 
   useImperativeHandle(ref, () => ({
     download: handleDownload,
+    downloadImage: handleDownload,
     copyImage: handleCopy,
+    copyImageToClipboard: handleCopy,
     getElement: () => containerRef.current,
   }), [handleDownload, handleCopy]);
 

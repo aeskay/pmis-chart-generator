@@ -73,6 +73,7 @@ export default function DistributionTab({
   pmisMap,
   pmisLoading,
   pmisProgress,
+  addToast,
 }) {
   const [viewMode, setViewMode] = useState('count'); // 'count' | 'percent'
   const [roadbedFilter, setRoadbedFilter] = useState('LR'); // 'LR' | 'R' | 'L' | 'all'
@@ -80,10 +81,29 @@ export default function DistributionTab({
   const [tableSearch, setTableSearch] = useState('');
   const [tableSortKey, setTableSortKey] = useState('conditionScore'); // 'unitId' | 'latestYear' | 'conditionScore' | 'distressScore' | 'rideScore'
   const [tableSortDir, setTableSortDir] = useState('desc'); // 'asc' | 'desc'
+  const [copyingChart, setCopyingChart] = useState(null); // 'cond' | 'dist' | 'ride' | null
+  const [copiedChart, setCopiedChart] = useState(null);
 
   const chartRefCond = useRef(null);
   const chartRefDist = useRef(null);
   const chartRefRide = useRef(null);
+
+  // Copy PNG to clipboard
+  const handleCopyChart = async (chartRef, chartKey, label) => {
+    if (!chartRef.current || copyingChart) return;
+    try {
+      setCopyingChart(chartKey);
+      await chartRef.current.copyImage();
+      setCopiedChart(chartKey);
+      setTimeout(() => setCopiedChart(null), 2000);
+      if (addToast) addToast('success', 'Chart Copied', `${label} copied to clipboard.`);
+    } catch (err) {
+      console.error(err);
+      if (addToast) addToast('error', 'Copy Failed', err.message || 'Could not copy image');
+    } finally {
+      setCopyingChart(null);
+    }
+  };
 
   // Discover all distinct slab thicknesses in the project
   const availableSlabThicknesses = useMemo(() => {
@@ -529,15 +549,28 @@ export default function DistributionTab({
                 Latest available PMIS year · Overall composite index
               </span>
             </div>
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={() => chartRefCond.current?.downloadImage(`condition_score_distribution`)}
-              title="Download Condition Distribution PNG"
-              style={{ fontSize: '11px', padding: '2px 6px' }}
-            >
-              📷 PNG
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => handleCopyChart(chartRefCond, 'cond', 'Condition Score Distribution')}
+                disabled={copyingChart === 'cond'}
+                title="Copy chart image directly to clipboard"
+                style={{ fontSize: '11px', padding: '2px 8px', gap: '4px', fontWeight: 600 }}
+              >
+                <span>{copiedChart === 'cond' ? '✓' : copyingChart === 'cond' ? '⏳' : '📋'}</span>
+                <span>{copiedChart === 'cond' ? 'Copied!' : copyingChart === 'cond' ? 'Copying…' : 'Copy'}</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => chartRefCond.current?.download(`condition_score_distribution`)}
+                title="Download Condition Distribution PNG"
+                style={{ fontSize: '11px', padding: '2px 8px' }}
+              >
+                📷 PNG
+              </button>
+            </div>
           </div>
 
           <PlotlyChart
@@ -559,15 +592,28 @@ export default function DistributionTab({
                 Latest available PMIS year · Cracking & punchout index
               </span>
             </div>
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={() => chartRefDist.current?.downloadImage(`distress_score_distribution`)}
-              title="Download Distress Distribution PNG"
-              style={{ fontSize: '11px', padding: '2px 6px' }}
-            >
-              📷 PNG
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => handleCopyChart(chartRefDist, 'dist', 'Distress Score Distribution')}
+                disabled={copyingChart === 'dist'}
+                title="Copy chart image directly to clipboard"
+                style={{ fontSize: '11px', padding: '2px 8px', gap: '4px', fontWeight: 600 }}
+              >
+                <span>{copiedChart === 'dist' ? '✓' : copyingChart === 'dist' ? '⏳' : '📋'}</span>
+                <span>{copiedChart === 'dist' ? 'Copied!' : copyingChart === 'dist' ? 'Copying…' : 'Copy'}</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => chartRefDist.current?.download(`distress_score_distribution`)}
+                title="Download Distress Distribution PNG"
+                style={{ fontSize: '11px', padding: '2px 8px' }}
+              >
+                📷 PNG
+              </button>
+            </div>
           </div>
 
           <PlotlyChart
@@ -589,15 +635,28 @@ export default function DistributionTab({
                 Latest available PMIS year · Smoothness rating (IRI)
               </span>
             </div>
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={() => chartRefRide.current?.downloadImage(`ride_score_distribution`)}
-              title="Download Ride Distribution PNG"
-              style={{ fontSize: '11px', padding: '2px 6px' }}
-            >
-              📷 PNG
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => handleCopyChart(chartRefRide, 'ride', 'Ride Score Distribution')}
+                disabled={copyingChart === 'ride'}
+                title="Copy chart image directly to clipboard"
+                style={{ fontSize: '11px', padding: '2px 8px', gap: '4px', fontWeight: 600 }}
+              >
+                <span>{copiedChart === 'ride' ? '✓' : copyingChart === 'ride' ? '⏳' : '📋'}</span>
+                <span>{copiedChart === 'ride' ? 'Copied!' : copyingChart === 'ride' ? 'Copying…' : 'Copy'}</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => chartRefRide.current?.download(`ride_score_distribution`)}
+                title="Download Ride Distribution PNG"
+                style={{ fontSize: '11px', padding: '2px 8px' }}
+              >
+                📷 PNG
+              </button>
+            </div>
           </div>
 
           <PlotlyChart
