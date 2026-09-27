@@ -62,7 +62,6 @@ export default function ChartsTab({
   const [slabThFilter, setSlabThFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' | 'desc' | 'count-desc' | 'count-asc'
   const [includeUnknown, setIncludeUnknown] = useState(true);
-  const [tableSearch, setTableSearch] = useState('');
 
   const chartRef = useRef(null);
 
@@ -97,21 +96,6 @@ export default function ChartsTab({
     });
   }, [sections, slabThFilter, roadbedFilter, sortOrder, includeUnknown]);
 
-  // Filter table rows by search query
-  const filteredTableRows = useMemo(() => {
-    if (!yearData || !yearData.tableRows) return [];
-    if (!tableSearch.trim()) return yearData.tableRows;
-    const q = tableSearch.toLowerCase().trim();
-    return yearData.tableRows.filter(r => {
-      const matchYear = String(r.year).toLowerCase().includes(q);
-      const matchSection = r.sections.some(s =>
-        String(s.id || '').toLowerCase().includes(q) ||
-        String(s.highway || '').toLowerCase().includes(q) ||
-        String(s.csj || '').toLowerCase().includes(q)
-      );
-      return matchYear || matchSection;
-    });
-  }, [yearData, tableSearch]);
 
   // ── Excel Export Handler ──
   const handleExportExcel = () => {
@@ -210,13 +194,8 @@ export default function ChartsTab({
     (yearData.lengthsByYear[yr] || 0).toFixed(2),
   ]);
 
-  // Color palette for bars (cohesive theme with distinct Unknown bar)
-  const barColors = yearData.years.map((yr, idx) => {
-    if (yr === 'Unknown') return '#9ca3af'; // Neutral gray for unknown
-    // Modern gradient from deep royal blue to bright cyan-teal
-    const t = yearData.years.length > 1 ? idx / (yearData.years.length - 1) : 0.5;
-    return `hsl(${215 + Math.round(t * 35)}, ${75 + Math.round(t * 15)}%, ${45 + Math.round(t * 10)}%)`;
-  });
+  // Bars styled in solid black (with dark charcoal for unknown if present)
+  const barColors = yearData.years.map(yr => (yr === 'Unknown' ? '#4b5563' : '#000000'));
 
   const maxY = Math.max(...yVals, 1);
   const upperLimit = viewMode === 'count'
@@ -571,109 +550,6 @@ export default function ChartsTab({
           layout={chartLayout}
           config={{ responsive: true, displayModeBar: false }}
         />
-      </div>
-
-      {/* ── Detailed Breakdown Table ── */}
-      <div className="chart-panel" style={{ background: 'var(--bg-surface)', padding: '20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-default)' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-heading)' }}>
-              Construction Year Breakdown Table
-            </h3>
-            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Detailed counts, percentages, and section listings by construction year cohort
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <input
-              type="text"
-              placeholder="Search year, section ID, highway..."
-              value={tableSearch}
-              onChange={(e) => setTableSearch(e.target.value)}
-              style={{
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '6px 12px',
-                fontSize: '12px',
-                color: 'var(--text-primary)',
-                minWidth: '220px',
-              }}
-            />
-          </div>
-        </div>
-
-        <div style={{ overflowX: 'auto' }}>
-          <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ background: 'var(--bg-elevated)', borderBottom: '2px solid var(--border-default)' }}>
-                <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600 }}>Construction Year</th>
-                <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>Number of Sections</th>
-                <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>Share (%)</th>
-                <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>Est. Length (mi)</th>
-                <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600 }}>Sections Included</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredTableRows.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                    No construction year cohorts match your search query.
-                  </td>
-                </tr>
-              ) : (
-                filteredTableRows.map((row) => (
-                  <tr
-                    key={row.year}
-                    style={{
-                      borderBottom: '1px solid var(--border-subtle)',
-                      transition: 'background 0.15s',
-                    }}
-                  >
-                    <td style={{ padding: '10px 14px', fontWeight: 700, fontFamily: 'monospace', fontSize: '14px', color: 'var(--accent-primary)' }}>
-                      {row.year}
-                    </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700 }}>
-                      {row.count}
-                    </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600 }}>
-                      {row.percent}%
-                    </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--text-secondary)' }}>
-                      {row.lengthMiles > 0 ? `${row.lengthMiles} mi` : '—'}
-                    </td>
-                    <td style={{ padding: '8px 14px' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxHeight: '72px', overflowY: 'auto' }}>
-                        {row.sections.map(sec => (
-                          <span
-                            key={sec.id}
-                            onClick={() => onSelectSection && onSelectSection(sec.id)}
-                            title={`Click to view section ${sec.id} (${sec.highway || 'PMIS'})`}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              background: 'var(--bg-panel)',
-                              border: '1px solid var(--border-default)',
-                              color: 'var(--text-primary)',
-                              cursor: 'pointer',
-                              fontFamily: 'monospace',
-                            }}
-                          >
-                            {sec.id}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
     </div>
   );
