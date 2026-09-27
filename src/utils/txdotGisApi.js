@@ -364,31 +364,47 @@ function findRoadwayFeatureForDfo(roadwayFeatures, targetDfo) {
 }
 
 /**
+ * Safely extracts vertex array from a Feature, paths, or vertices array.
+ */
+function getVerticesFromGeometry(featOrPaths) {
+  if (!featOrPaths) return null;
+  const p = featOrPaths.geometry?.paths || featOrPaths;
+  if (!Array.isArray(p) || p.length === 0) return null;
+  if (Array.isArray(p[0]) && Array.isArray(p[0][0])) {
+    return p[0];
+  }
+  if (Array.isArray(p[0]) && typeof p[0][0] === 'number') {
+    return p;
+  }
+  return null;
+}
+
+/**
  * Interpolate a point [lat, lon] at a specific DFO along a roadway polyline or feature.
  */
 function interpolatePointAtDfo(featOrPaths, targetDfo) {
-  if (!featOrPaths) return null;
-  const paths = Array.isArray(featOrPaths) ? featOrPaths : featOrPaths.geometry?.paths;
-  if (!paths || paths.length === 0) return null;
-
-  const vertices = paths[0] || paths;
+  const vertices = getVerticesFromGeometry(featOrPaths);
   if (!vertices || vertices.length === 0) return null;
 
   const firstM = vertices[0][2];
   const lastM = vertices[vertices.length - 1][2];
+  if (typeof firstM !== 'number' || typeof lastM !== 'number') return null;
 
   if (targetDfo <= Math.min(firstM, lastM)) {
     const pt = firstM <= lastM ? vertices[0] : vertices[vertices.length - 1];
+    if (!pt || typeof pt[1] !== 'number' || typeof pt[0] !== 'number') return null;
     return [Number(pt[1].toFixed(6)), Number(pt[0].toFixed(6))];
   }
   if (targetDfo >= Math.max(firstM, lastM)) {
     const pt = firstM >= lastM ? vertices[0] : vertices[vertices.length - 1];
+    if (!pt || typeof pt[1] !== 'number' || typeof pt[0] !== 'number') return null;
     return [Number(pt[1].toFixed(6)), Number(pt[0].toFixed(6))];
   }
 
   for (let i = 0; i < vertices.length - 1; i++) {
     const p1 = vertices[i];
     const p2 = vertices[i + 1];
+    if (!p1 || !p2 || typeof p1[2] !== 'number' || typeof p2[2] !== 'number') continue;
     const minM = Math.min(p1[2], p2[2]);
     const maxM = Math.max(p1[2], p2[2]);
 
@@ -397,11 +413,14 @@ function interpolatePointAtDfo(featOrPaths, targetDfo) {
       const ratio = (targetDfo - p1[2]) / denom;
       const lat = p1[1] + ratio * (p2[1] - p1[1]);
       const lon = p1[0] + ratio * (p2[0] - p1[0]);
+      if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) continue;
       return [Number(lat.toFixed(6)), Number(lon.toFixed(6))];
     }
   }
 
-  return [Number(vertices[0][1].toFixed(6)), Number(vertices[0][0].toFixed(6))];
+  const fallbackPt = vertices[0];
+  if (!fallbackPt || typeof fallbackPt[1] !== 'number' || typeof fallbackPt[0] !== 'number') return null;
+  return [Number(fallbackPt[1].toFixed(6)), Number(fallbackPt[0].toFixed(6))];
 }
 
 /**
@@ -438,8 +457,7 @@ function extractPathBetweenDfosFromFeatures(roadwayFeatures, beginDfo, endDfo) {
 }
 
 function extractPathFromSingleFeature(feat, beginDfo, endDfo) {
-  if (!feat || !feat.geometry?.paths) return [];
-  const vertices = feat.geometry.paths[0];
+  const vertices = getVerticesFromGeometry(feat);
   if (!vertices || vertices.length === 0) return [];
 
   const startD = Math.min(beginDfo, endDfo);
@@ -452,9 +470,12 @@ function extractPathFromSingleFeature(feat, beginDfo, endDfo) {
   if (startPt) segment.push(startPt);
 
   for (let i = 0; i < vertices.length; i++) {
-    const m = vertices[i][2];
-    if (m > startD && m < stopD) {
-      segment.push([Number(vertices[i][1].toFixed(6)), Number(vertices[i][0].toFixed(6))]);
+    const v = vertices[i];
+    if (Array.isArray(v) && typeof v[2] === 'number') {
+      const m = v[2];
+      if (m > startD && m < stopD && typeof v[1] === 'number' && typeof v[0] === 'number') {
+        segment.push([Number(v[1].toFixed(6)), Number(v[0].toFixed(6))]);
+      }
     }
   }
 
@@ -618,40 +639,67 @@ async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, e
 
   // Fallback: interpolate directly between the candidate reference marker points
   if (!beginCoord || !endCoord) {
+    const validCandidateMarkers = candidateMarkers
+      .filter(m => typeof m.lat === 'number' && typeof m.lon === 'number' && !isNaN(m.lat) && !isNaN(m.lon));
+
     const findClosestPoint = (targetRef) => {
-      const sorted = [...candidateMarkers].sort((a, b) => Math.abs(a.marker - targetRef) - Math.abs(b.marker - targetRef));
+      if (validCandidateMarkers.length === 0) return null;
+      const sorted = [...validCandidateMarkers].sort((a, b) => Math.abs(a.marker - targetRef) - Math.abs(b.marker - targetRef));
       if (sorted.length >= 2) {
         const m1 = sorted[0];
         const m2 = sorted[1];
         const denom = (m2.marker - m1.marker) || 1;
         const ratio = (targetRef - m1.marker) / denom;
-        return [
-          Number((m1.lat + ratio * (m2.lat - m1.lat)).toFixed(6)),
-          Number((m1.lon + ratio * (m2.lon - m1.lon)).toFixed(6))
-        ];
+        const lat = m1.lat + ratio * (m2.lat - m1.lat);
+        const lon = m1.lon + ratio * (m2.lon - m1.lon);
+        if (typeof lat === 'number' && typeof lon === 'number' && !isNaN(lat) && !isNaN(lon)) {
+          return [Number(lat.toFixed(6)), Number(lon.toFixed(6))];
+        }
       }
-      return [Number(sorted[0].lat.toFixed(6)), Number(sorted[0].lon.toFixed(6))];
+      if (sorted.length > 0 && typeof sorted[0].lat === 'number' && typeof sorted[0].lon === 'number') {
+        return [Number(sorted[0].lat.toFixed(6)), Number(sorted[0].lon.toFixed(6))];
+      }
+      return null;
     };
 
     beginCoord = beginCoord || findClosestPoint(beginRef);
     endCoord = endCoord || findClosestPoint(endRef);
-    path = [beginCoord, endCoord];
+    if (beginCoord && endCoord) {
+      path = [beginCoord, endCoord];
+    }
   }
 
   // Sanity check against district bounds
-  if (canonicalDist) {
+  if (canonicalDist && beginCoord && endCoord) {
     if (!isCoordinateInDistrict(beginCoord, canonicalDist) || !isCoordinateInDistrict(endCoord, canonicalDist)) {
       console.warn(`[txdotGisApi] Warning: Coordinates [${beginCoord}] fall outside ${canonicalDist} district bounds. Retrying with marker fallback.`);
-      // Force fallback to candidate markers directly
-      if (candidateMarkers.length > 0) {
-        const sorted = [...candidateMarkers].sort((a, b) => Math.abs(a.marker - beginRef) - Math.abs(b.marker - beginRef));
-        beginCoord = [Number(sorted[0].lat.toFixed(6)), Number(sorted[0].lon.toFixed(6))];
-        const sortedEnd = [...candidateMarkers].sort((a, b) => Math.abs(a.marker - endRef) - Math.abs(b.marker - endRef));
-        endCoord = [Number(sortedEnd[0].lat.toFixed(6)), Number(sortedEnd[0].lon.toFixed(6))];
-        path = [beginCoord, endCoord];
+      const validCandidateMarkers = candidateMarkers
+        .filter(m => typeof m.lat === 'number' && typeof m.lon === 'number' && !isNaN(m.lat) && !isNaN(m.lon));
+      if (validCandidateMarkers.length > 0) {
+        const sorted = [...validCandidateMarkers].sort((a, b) => Math.abs(a.marker - beginRef) - Math.abs(b.marker - beginRef));
+        if (sorted[0] && typeof sorted[0].lat === 'number' && typeof sorted[0].lon === 'number') {
+          beginCoord = [Number(sorted[0].lat.toFixed(6)), Number(sorted[0].lon.toFixed(6))];
+        }
+        const sortedEnd = [...validCandidateMarkers].sort((a, b) => Math.abs(a.marker - endRef) - Math.abs(b.marker - endRef));
+        if (sortedEnd[0] && typeof sortedEnd[0].lat === 'number' && typeof sortedEnd[0].lon === 'number') {
+          endCoord = [Number(sortedEnd[0].lat.toFixed(6)), Number(sortedEnd[0].lon.toFixed(6))];
+        }
+        if (beginCoord && endCoord) {
+          path = [beginCoord, endCoord];
+        }
       }
     }
   }
+
+  if (!beginCoord || !endCoord) {
+    return {
+      available: false,
+      error: `Could not resolve coordinates for RM ${beginRef} – ${endRef}`,
+    };
+  }
+
+  const bDfoNum = beginDfo !== null && !isNaN(beginDfo) ? Number(beginDfo.toFixed(3)) : 0;
+  const eDfoNum = endDfo !== null && !isNaN(endDfo) ? Number(endDfo.toFixed(3)) : 0;
 
   return {
     available: true,
@@ -659,10 +707,10 @@ async function resolveRoadbedCoordinates(paddedRoute, roadbedLetter, beginRef, e
     routeId: targetRouteId,
     begin: beginCoord,   // [lat, lon]
     end: endCoord,       // [lat, lon]
-    beginDfo: Number(beginDfo.toFixed(3)),
-    endDfo: Number(endDfo.toFixed(3)),
-    lengthMiles: Number(Math.abs(endDfo - beginDfo).toFixed(3)),
-    path,                // Array of [lat, lon]
+    beginDfo: bDfoNum,
+    endDfo: eDfoNum,
+    lengthMiles: Number(Math.abs(eDfoNum - bDfoNum).toFixed(3)),
+    path: path.length > 0 ? path : [beginCoord, endCoord],
   };
 }
 
