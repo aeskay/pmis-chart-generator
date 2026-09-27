@@ -229,24 +229,27 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
   if (!pmisMap || !sections || !sections.length) return null;
 
   // Map of x (Age or Fiscal Year) -> accumulated data
-  const aggByX = new Map(); // x -> { acp: 0, pcc: 0, punch: 0, spall: 0, totalLen: 0, sections: Set<sectionId> }
+  const aggByX = new Map(); // x -> { acp: 0, pcc: 0, punch: 0, spall: 0, totalLen: 0, sectionIds: Set<unitId> }
   const validSectionIds = new Set();
+  const validBaseSectionIds = new Set();
   const roadbedCounts = { R: 0, L: 0, '': 0, K: 0, A: 0 };
 
   for (const section of sections) {
-
     const district = cleanDistrictString(section.district || '');
-    const { base } = parseHighwayComponents(section.highway);
+    const { base, explicitSuffix } = parseHighwayComponents(section.highway);
     const start = parseFloat(section.beginRef);
     const end = parseFloat(section.endRef);
     const yearConst = parseInt(section.yearConstructed, 10);
+    const secId = section.id || section.sn || `${section.highway}_${start}`;
 
     if (isNaN(start) || isNaN(end)) continue;
     if (alignMode === 'age' && (isNaN(yearConst) || yearConst <= 1900)) continue;
 
     // Determine which roadbed suffixes to query for this section
     let activeSuffixes = ['R', 'L'];
-    if (specificRoadbed === 'LR') {
+    if (explicitSuffix) {
+      activeSuffixes = [explicitSuffix];
+    } else if (specificRoadbed === 'LR') {
       activeSuffixes = ['L', 'R'];
     } else if (specificRoadbed === 'all') {
       activeSuffixes = ['R', 'L', '', 'K', 'A'];
@@ -254,18 +257,17 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
       activeSuffixes = [specificRoadbed];
     }
 
-    let sectionContributed = false;
-    const roadbedsContributedThisSection = new Set();
-
-    // Collect distress per year for this section (aggregated across matching roadbeds)
-    const byYear = {}; // year -> { acp: 0, pcc: 0, punch: 0, spall: 0, len: 0 }
-
     for (const sfx of activeSuffixes) {
       const key = `${district}|${base}${sfx}`;
       const records = pmisMap.get(key);
       if (!records || !records.length) continue;
 
+      const sfxLabel = sfx || explicitSuffix || '';
+      const hasSfxInId = sfxLabel && (String(secId).endsWith(`(${sfxLabel})`) || String(secId).endsWith(`-${sfxLabel}`));
+      const unitId = hasSfxInId ? String(secId) : `${secId}${sfxLabel ? ' (' + sfxLabel + ')' : ''}`;
+
       let rbedContributed = false;
+      const byYear = {}; // year -> { acp: 0, pcc: 0, punch: 0, spall: 0, len: 0 }
 
       for (const p of records) {
         const overlapStart = Math.max(start, p.startRef);
@@ -291,37 +293,30 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
       }
 
       if (rbedContributed) {
-        roadbedsContributedThisSection.add(sfx);
-      }
-    }
-
-    for (const [yrStr, vals] of Object.entries(byYear)) {
-      if (vals.len <= 0) continue;
-      const fiscalYear = Number(yrStr);
-      const x = alignMode === 'age' ? (fiscalYear - yearConst) : fiscalYear;
-
-      // Filter negative ages if any anomalous evaluation dates occur prior to construction
-      if (alignMode === 'age' && x < 0) continue;
-
-      if (!aggByX.has(x)) {
-        aggByX.set(x, { acp: 0, pcc: 0, punch: 0, spall: 0, totalLen: 0, sectionIds: new Set() });
-      }
-
-      const agg = aggByX.get(x);
-      agg.acp += vals.acp;
-      agg.pcc += vals.pcc;
-      agg.punch += vals.punch;
-      agg.spall += vals.spall;
-      agg.totalLen += vals.len;
-      agg.sectionIds.add(section.id || section.sn || `${section.highway}_${start}`);
-
-      sectionContributed = true;
-    }
-
-    if (sectionContributed) {
-      validSectionIds.add(section.id || section.sn || `${section.highway}_${start}`);
-      for (const sfx of roadbedsContributedThisSection) {
         roadbedCounts[sfx] = (roadbedCounts[sfx] || 0) + 1;
+        validSectionIds.add(unitId);
+        validBaseSectionIds.add(secId);
+      }
+
+      for (const [yrStr, vals] of Object.entries(byYear)) {
+        if (vals.len <= 0) continue;
+        const fiscalYear = Number(yrStr);
+        const x = alignMode === 'age' ? (fiscalYear - yearConst) : fiscalYear;
+
+        // Filter negative ages if any anomalous evaluation dates occur prior to construction
+        if (alignMode === 'age' && x < 0) continue;
+
+        if (!aggByX.has(x)) {
+          aggByX.set(x, { acp: 0, pcc: 0, punch: 0, spall: 0, totalLen: 0, sectionIds: new Set() });
+        }
+
+        const agg = aggByX.get(x);
+        agg.acp += vals.acp;
+        agg.pcc += vals.pcc;
+        agg.punch += vals.punch;
+        agg.spall += vals.spall;
+        agg.totalLen += vals.len;
+        agg.sectionIds.add(unitId);
       }
     }
   }
@@ -377,7 +372,8 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
     totalMiles,
     yMax,
     step,
-    validSectionsCount: validSectionIds.size,
+    validSectionsCount: validBaseSectionIds.size,
+    validUnitsCount: validSectionIds.size,
     maxCount,
     roadbedCounts,
   };

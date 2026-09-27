@@ -286,6 +286,7 @@ export default function DistressTab({
 
     return {
       validSections: aggData.validSectionsCount,
+      validUnits: aggData.validUnitsCount,
       totalTracked: targetSections.length,
       maxAge,
       minAge,
@@ -424,7 +425,7 @@ export default function DistressTab({
       mode: 'lines',
       line: { color: '#000000', width: 2.5 },
       yaxis: 'y2',
-      hovertemplate: '<b>Sections</b>: %{y}<extra></extra>',
+      hovertemplate: '<b>Sections (Roadbeds)</b>: %{y}<extra></extra>',
     },
   ] : [];
 
@@ -850,9 +851,11 @@ export default function DistressTab({
             label="Analyzed Sections"
             value={`${stats.validSections} / ${stats.totalTracked}`}
             sub={
-              excludedSectionIds.size > 0
-                ? `${excludedSectionIds.size} excluded manually`
-                : (alignMode === 'age' ? 'With construction year' : 'With PMIS data')
+              stats.validUnits > stats.validSections
+                ? `${stats.validUnits} roadbed units (L & R)`
+                : (excludedSectionIds.size > 0
+                    ? `${excludedSectionIds.size} excluded manually`
+                    : (alignMode === 'age' ? 'With construction year' : 'With PMIS data'))
             }
             accent={excludedSectionIds.size > 0 ? 'var(--warning)' : 'var(--accent-secondary)'}
           />
@@ -918,7 +921,7 @@ export default function DistressTab({
           <InfoMetric
             label="Max Section Sample"
             value={stats.maxSectionCount}
-            sub="Peak concurrent sections"
+            sub="Peak concurrent roadbeds"
             accent="var(--success)"
           />
         </div>
