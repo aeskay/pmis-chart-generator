@@ -4,7 +4,7 @@
  */
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBLhdh0cU9Pi1nFiEcXM4kCvcDgWxMQ9jE",
@@ -20,4 +20,10 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-export const db = getFirestore(app);
+
+// Force long-polling transport to avoid ERR_QUIC_PROTOCOL_ERROR on some networks/CDNs.
+// QUIC (HTTP/3) can be blocked by Netlify edge nodes and certain ISPs.
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+  useFetchStreams: false,
+});
