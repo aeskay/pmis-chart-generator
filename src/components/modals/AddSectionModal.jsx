@@ -25,6 +25,10 @@ const OPTIONAL_FIELDS = [
   { key: 'base',            label: 'Base Type',        type: 'text',   placeholder: '' },
   { key: 'baseTh',          label: 'Base Thickness',   type: 'number', placeholder: 'inches' },
   { key: 'sub',             label: 'Subgrade',         type: 'text',   placeholder: '' },
+  { key: 'gpsStartR',       label: 'GPS Start (R)',    type: 'text',   placeholder: 'e.g., 33.1, -96.5' },
+  { key: 'gpsEndR',         label: 'GPS End (R)',      type: 'text',   placeholder: 'e.g., 33.2, -96.6' },
+  { key: 'gpsStartL',       label: 'GPS Start (L)',    type: 'text',   placeholder: 'e.g., 33.1, -96.5' },
+  { key: 'gpsEndL',         label: 'GPS End (L)',      type: 'text',   placeholder: 'e.g., 33.2, -96.6' },
 ];
 
 export default function AddSectionModal({
@@ -52,6 +56,10 @@ export default function AddSectionModal({
         base: initialData.base ?? '',
         baseTh: initialData.baseTh ?? '',
         sub: initialData.sub ?? '',
+        gpsStartR: initialData.gpsStartR ?? '',
+        gpsEndR: initialData.gpsEndR ?? '',
+        gpsStartL: initialData.gpsStartL ?? '',
+        gpsEndL: initialData.gpsEndL ?? '',
       });
     } else {
       setForm({});
@@ -107,9 +115,42 @@ export default function AddSectionModal({
       base:            form.base?.toString().trim()   || null,
       baseTh:          form.baseTh     ? parseFloat(form.baseTh)     : null,
       sub:             form.sub?.toString().trim()    || null,
+      gpsStartR:       form.gpsStartR?.toString().trim() || null,
+      gpsEndR:         form.gpsEndR?.toString().trim() || null,
+      gpsStartL:       form.gpsStartL?.toString().trim() || null,
+      gpsEndL:         form.gpsEndL?.toString().trim() || null,
       columnMappings:  initialData?.columnMappings || {},
       extraColumns:    initialData?.extraColumns || {},
     };
+
+    const parseCoord = (str) => {
+      if (!str) return null;
+      const parts = String(str).split(',');
+      if (parts.length >= 2) {
+        const lat = parseFloat(parts[0].trim());
+        const lon = parseFloat(parts[1].trim());
+        if (!isNaN(lat) && !isNaN(lon)) return [lat, lon];
+      }
+      return null;
+    };
+
+    const gpsStartR = parseCoord(section.gpsStartR);
+    const gpsEndR   = parseCoord(section.gpsEndR);
+    const gpsStartL = parseCoord(section.gpsStartL);
+    const gpsEndL   = parseCoord(section.gpsEndL);
+
+    if (gpsStartR || gpsEndR || gpsStartL || gpsEndL) {
+      section.coordinates = { ...(initialData?.coordinates || {}), status: 'success' };
+      
+      if (gpsStartR && gpsEndR) {
+        section.coordinates.R = { available: true, begin: gpsStartR, end: gpsEndR, path: [gpsStartR, gpsEndR], lengthMiles: 0 };
+      }
+      if (gpsStartL && gpsEndL) {
+        section.coordinates.L = { available: true, begin: gpsStartL, end: gpsEndL, path: [gpsStartL, gpsEndL], lengthMiles: 0 };
+      }
+    } else if (initialData?.coordinates) {
+      section.coordinates = initialData.coordinates;
+    }
 
     if (isEditing && onSave) {
       onSave(section);

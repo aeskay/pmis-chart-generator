@@ -258,6 +258,9 @@ export default function MapTab({
       center: [31.5, -99.5],
       zoom: 6,
       zoomControl: false,
+      zoomSnap: 0.25,
+      zoomDelta: 0.5,
+      wheelPxPerZoomLevel: 120,
     });
 
     // Custom top-right zoom control

@@ -27,6 +27,10 @@ const OPTIONAL_FIELDS = [
   { appKey: 'base',            label: 'Base Type' },
   { appKey: 'baseTh',          label: 'Base Thickness' },
   { appKey: 'sub',             label: 'Subgrade' },
+  { appKey: 'gpsStartR',       label: 'GPS Start (R)', hint: 'Format: lat, lon' },
+  { appKey: 'gpsEndR',         label: 'GPS End (R)', hint: 'Format: lat, lon' },
+  { appKey: 'gpsStartL',       label: 'GPS Start (L)', hint: 'Format: lat, lon' },
+  { appKey: 'gpsEndL',         label: 'GPS End (L)', hint: 'Format: lat, lon' },
 ];
 
 // ─── Fuzzy auto-suggest ──────────────────────────────────────────────────────
@@ -47,6 +51,10 @@ const SUGGEST_MAP = {
   base:            ['base type', 'base', 'base material'],
   baseTh:          ['base thickness', 'base th', 'base depth'],
   sub:             ['subgrade', 'sub', 'subbase'],
+  gpsStartR:       ['gps start r', 'start r', 'gps begin r'],
+  gpsEndR:         ['gps end r', 'end r'],
+  gpsStartL:       ['gps start l', 'start l', 'gps begin l'],
+  gpsEndL:         ['gps end l', 'end l'],
 };
 
 function autoSuggest(appKey, headers) {
@@ -72,6 +80,34 @@ function buildSection(row, mappings, customMappings) {
     }
   }
 
+  const parseCoord = (str) => {
+    if (!str) return null;
+    const parts = String(str).split(',');
+    if (parts.length >= 2) {
+      const lat = parseFloat(parts[0].trim());
+      const lon = parseFloat(parts[1].trim());
+      if (!isNaN(lat) && !isNaN(lon)) return [lat, lon];
+    }
+    return null;
+  };
+
+  const gpsStartR = parseCoord(get('gpsStartR'));
+  const gpsEndR   = parseCoord(get('gpsEndR'));
+  const gpsStartL = parseCoord(get('gpsStartL'));
+  const gpsEndL   = parseCoord(get('gpsEndL'));
+
+  let coordinates = null;
+  if (gpsStartR || gpsEndR || gpsStartL || gpsEndL) {
+    coordinates = { status: 'success' };
+    
+    if (gpsStartR && gpsEndR) {
+      coordinates.R = { available: true, begin: gpsStartR, end: gpsEndR, path: [gpsStartR, gpsEndR], lengthMiles: 0 };
+    }
+    if (gpsStartL && gpsEndL) {
+      coordinates.L = { available: true, begin: gpsStartL, end: gpsEndL, path: [gpsStartL, gpsEndL], lengthMiles: 0 };
+    }
+  }
+
   return {
     _uuid:           uuidv4(),
     id:              String(get('id') ?? '').trim(),
@@ -92,6 +128,12 @@ function buildSection(row, mappings, customMappings) {
     sub:             String(get('sub') ?? '').trim() || null,
     columnMappings:  { ...mappings },
     extraColumns,
+    ...(coordinates ? { coordinates } : {}),
+    // Raw strings for data table
+    gpsStartR:       String(get('gpsStartR') ?? '').trim() || null,
+    gpsEndR:         String(get('gpsEndR') ?? '').trim() || null,
+    gpsStartL:       String(get('gpsStartL') ?? '').trim() || null,
+    gpsEndL:         String(get('gpsEndL') ?? '').trim() || null,
   };
 }
 
