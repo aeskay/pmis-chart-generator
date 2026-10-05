@@ -29,6 +29,7 @@ import BatchGpsModal from '../modals/BatchGpsModal';
 import GisExportModal from '../modals/GisExportModal';
 import { downloadSingleSectionKml } from '../../utils/gisExporter';
 import texasBoundary from '../../utils/texasBoundary.json';
+import './MapTab.css'; // For custom label styles
 
 const CARTO_KEY = import.meta.env.VITE_CARTO_API_KEY || 'cb1_3x0o_1_0e98f5ff4c4adb42019dcfeb';
 const cartoKeyParam = CARTO_KEY ? `?key=${CARTO_KEY}` : '';
@@ -68,6 +69,12 @@ const BASEMAPS = {
     attribution: '&copy; Esri',
     maxZoom: 19,
   },
+  txdot: {
+    name: 'TxDOT Planning (Gray)',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, TxDOT',
+    maxZoom: 19,
+  },
 };
 
 // Roadbed Colors for Roadbed color mode
@@ -75,6 +82,38 @@ const ROADBED_COLORS = {
   R: '#f97316', // Orange / Amber
   L: '#0ea5e9', // Sky Blue / Cyan
   K: '#10b981', // Emerald / Undivided
+};
+
+const getDistrictAbbr = (name) => {
+  if (!name) return '';
+  const mapping = {
+    'PARIS': 'PAR',
+    'FORT WORTH': 'FTW',
+    'WICHITA FALLS': 'WFS',
+    'AMARILLO': 'AMA',
+    'LUBBOCK': 'LBB',
+    'ODESSA': 'ODA',
+    'SAN ANGELO': 'SJT',
+    'ABILENE': 'ABL',
+    'WACO': 'WAC',
+    'TYLER': 'TYL',
+    'LUFKIN': 'LFK',
+    'HOUSTON': 'HOU',
+    'YOAKUM': 'YKM',
+    'AUSTIN': 'AUS',
+    'SAN ANTONIO': 'SAT',
+    'CORPUS CHRISTI': 'CRP',
+    'BRYAN': 'BRY',
+    'DALLAS': 'DAL',
+    'ATLANTA': 'ATL',
+    'BEAUMONT': 'BMT',
+    'PHARR': 'PHR',
+    'LAREDO': 'LRD',
+    'BROWNWOOD': 'BWD',
+    'EL PASO': 'ELP',
+    'CHILDRESS': 'CHS'
+  };
+  return mapping[name.toUpperCase()] || name;
 };
 
 export default function MapTab({
@@ -88,10 +127,14 @@ export default function MapTab({
   addToast,
 }) {
   // ── States ─────────────────────────────────────────────────────────────────
-  const [selectedBasemap, setSelectedBasemap] = useState('dark');
-  const [colorMetric, setColorMetric] = useState('condition'); // 'condition' | 'distress' | 'ride' | 'roadbed' | 'slab'
+  const [selectedBasemap, setSelectedBasemap] = useState('txdot');
+  const [colorMetric, setColorMetric] = useState('condition'); // 'condition' | 'distress' | 'ride' | 'roadbed' | 'slab' | 'red'
   const [roadbedFilter, setRoadbedFilter] = useState('both');   // 'both' | 'R' | 'L'
   const [endpointMarkers, setEndpointMarkers] = useState('none'); // 'none' | 'selected' | 'faint'
+  const [sectionStyle, setSectionStyle] = useState('dots'); // 'lines' | 'dots'
+  const [dotSize, setDotSize] = useState(6);
+  const [showDistricts, setShowDistricts] = useState(false);
+  const [showCounties, setShowCounties] = useState(false);
   const [texasOnly, setTexasOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');      // 'all' | 'mapped' | 'unmapped'
@@ -111,6 +154,8 @@ export default function MapTab({
   const labelsLayerRef = useRef(null);
   const layersGroupRef = useRef(null);
   const maskLayerRef = useRef(null);
+  const districtLayerRef = useRef(null);
+  const countyLayerRef = useRef(null);
   const sectionLayersMapRef = useRef(new Map()); // sectionId -> array of layers
 
   // ── Compute Section Scores ────────────────────────────────────────────────
@@ -228,6 +273,7 @@ export default function MapTab({
       attribution: baseConfig.attribution,
       maxZoom: baseConfig.maxZoom || 19,
       subdomains: baseConfig.subdomains || 'abc',
+      crossOrigin: true, // Needed for html2canvas export
     }).addTo(map);
     tileLayerRef.current = tileLayer;
 
@@ -260,12 +306,14 @@ export default function MapTab({
       attribution: baseConfig.attribution,
       maxZoom: baseConfig.maxZoom || 19,
       subdomains: baseConfig.subdomains || 'abc',
+      crossOrigin: true,
     }).addTo(map);
 
     // Add labels layer for satellite hybrid if specified
     if (baseConfig.labelsUrl) {
       labelsLayerRef.current = L.tileLayer(baseConfig.labelsUrl, {
         maxZoom: 19,
+        crossOrigin: true,
       }).addTo(map);
     }
   }, [selectedBasemap]);
@@ -289,8 +337,8 @@ export default function MapTab({
       selectedBasemap === 'dark'
         ? '#0b0f19'
         : selectedBasemap === 'satellite'
-        ? '#070b14'
-        : '#ffffff';
+          ? '#070b14'
+          : '#ffffff';
 
     const borderColor =
       selectedBasemap === 'dark' || selectedBasemap === 'satellite'
@@ -339,10 +387,10 @@ export default function MapTab({
         }
         return {
           fill: false,
-          color: borderColor,
-          weight: 2,
-          opacity: 0.9,
-          dashArray: '4, 4',
+          color: '#cbd5e1', // Light slate
+          weight: 1,
+          opacity: 1.0,
+          dashArray: null,
           interactive: false,
         };
       },
@@ -361,6 +409,7 @@ export default function MapTab({
 
   // ── Color Resolving Helper ────────────────────────────────────────────────
   const getLineColor = (section, roadbed) => {
+    if (colorMetric === 'red') return '#ef4444'; // Red
     if (colorMetric === 'roadbed') {
       return roadbed === 'R' ? ROADBED_COLORS.R : (roadbed === 'L' ? ROADBED_COLORS.L : ROADBED_COLORS.K);
     }
@@ -393,7 +442,7 @@ export default function MapTab({
       if (isNaN(th)) return '#64748b';
       if (th >= 12) return '#8b5cf6';
       if (th >= 10) return '#3b82f6';
-      if (th >= 8)  return '#10b981';
+      if (th >= 8) return '#10b981';
       return '#f59e0b';
     }
 
@@ -595,8 +644,50 @@ export default function MapTab({
           secLayers.push(startMarker, endMarker);
         }
 
-        group.addLayer(polyline);
-        secLayers.push(polyline);
+        if (sectionStyle === 'dots') {
+          // Draw as circle marker at the midpoint
+          const ptIndex = Math.floor(latLngs.length / 2);
+          const pt = latLngs[ptIndex];
+          const marker = L.circleMarker(pt, {
+            color: isSelected ? '#ffffff' : color,
+            fillColor: color,
+            fillOpacity: isSelected ? 1 : 0.85,
+            radius: isSelected ? dotSize + 3 : dotSize,
+            weight: isSelected ? 3 : 1.5,
+          });
+
+          marker.on('mouseover', () => { marker.setStyle({ weight: 3, radius: dotSize + 2 }); });
+          marker.on('mouseout', () => { 
+            marker.setStyle({ 
+              weight: selectedSectionId === section.id ? 3 : 1.5,
+              radius: selectedSectionId === section.id ? dotSize + 3 : dotSize
+            }); 
+          });
+
+          marker.on('click', () => { if (onSelectSection) onSelectSection(section.id); });
+          marker.bindPopup(popupHtml, { maxWidth: 300 });
+
+          marker.on('popupopen', () => {
+            setTimeout(() => {
+              const btnCharts = document.getElementById(`btn-popup-charts-${section.id}`);
+              if (btnCharts) btnCharts.onclick = () => { if (onSelectSection) onSelectSection(section.id); };
+              const btnCoords = document.getElementById(`btn-popup-coords-${section.id}`);
+              if (btnCoords) btnCoords.onclick = () => { setInspectSection(section); };
+              const btnKml = document.getElementById(`btn-popup-kml-${section.id}`);
+              if (btnKml) btnKml.onclick = () => {
+                downloadSingleSectionKml(section);
+                if (addToast) addToast('success', 'KML Downloaded', `Saved Google Earth KML for Section ${section.id}`);
+              };
+            }, 50);
+          });
+
+          group.addLayer(marker);
+          secLayers.push(marker);
+        } else {
+          // Draw Polyline
+          group.addLayer(polyline);
+          secLayers.push(polyline);
+        }
       });
 
       sectionLayersMapRef.current.set(section.id, secLayers);
@@ -607,7 +698,7 @@ export default function MapTab({
       const bounds = L.latLngBounds(allLatLngs);
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
     }
-  }, [mappedSections, colorMetric, roadbedFilter, selectedSectionId, sectionScores, endpointMarkers]);
+  }, [mappedSections, colorMetric, roadbedFilter, selectedSectionId, sectionScores, endpointMarkers, sectionStyle, dotSize]);
 
   // ── Fly to Selected Section on Selection Change ───────────────────────────
   useEffect(() => {
@@ -639,6 +730,85 @@ export default function MapTab({
   }, [selectedSectionId, sections]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
+
+  // ── Overlay Feature Layers (Districts / Counties) ─────────────────────────
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (showDistricts) {
+      if (!districtLayerRef.current) {
+        fetch('https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Districts/FeatureServer/0/query?where=1=1&outFields=DIST_NM&outSR=4326&f=geojson')
+          .then(res => res.json())
+          .then(data => {
+            districtLayerRef.current = L.geoJSON(data, {
+              style: {
+                color: '#cbd5e1', // Light gray lines
+                weight: 1,
+                opacity: 0.8,
+                fillOpacity: 0
+              },
+              onEachFeature: (feature, layer) => {
+                if (feature.properties?.DIST_NM) {
+                  const abbr = getDistrictAbbr(feature.properties.DIST_NM);
+                  layer.bindTooltip(abbr, { 
+                    permanent: true, 
+                    direction: 'center', 
+                    className: 'district-map-label' 
+                  });
+                }
+              }
+            }).addTo(map);
+          })
+          .catch(err => console.error("Failed to load TxDOT districts:", err));
+      } else {
+        if (!map.hasLayer(districtLayerRef.current)) map.addLayer(districtLayerRef.current);
+      }
+    } else {
+      if (districtLayerRef.current && map.hasLayer(districtLayerRef.current)) {
+        map.removeLayer(districtLayerRef.current);
+      }
+    }
+  }, [showDistricts]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (showCounties) {
+      if (!countyLayerRef.current) {
+        fetch('https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Counties/FeatureServer/0/query?where=1=1&outFields=CNTY_NM&outSR=4326&f=geojson')
+          .then(res => res.json())
+          .then(data => {
+            countyLayerRef.current = L.geoJSON(data, {
+              style: {
+                color: '#e2e8f0', // Very light gray dashed lines
+                weight: 1,
+                opacity: 0.6,
+                fillOpacity: 0,
+                dashArray: '4, 4'
+              },
+              onEachFeature: (feature, layer) => {
+                if (feature.properties?.CNTY_NM) {
+                  layer.bindTooltip(feature.properties.CNTY_NM, { 
+                    permanent: true, 
+                    direction: 'center', 
+                    className: 'county-map-label' 
+                  });
+                }
+              }
+            }).addTo(map);
+          })
+          .catch(err => console.error("Failed to load TxDOT counties:", err));
+      } else {
+        if (!map.hasLayer(countyLayerRef.current)) map.addLayer(countyLayerRef.current);
+      }
+    } else {
+      if (countyLayerRef.current && map.hasLayer(countyLayerRef.current)) {
+        map.removeLayer(countyLayerRef.current);
+      }
+    }
+  }, [showCounties]);
   const handleFitAll = () => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -690,6 +860,36 @@ export default function MapTab({
     if (onSelectSection) onSelectSection(section.id);
   };
 
+  const handleExportPng = async () => {
+    if (!mapContainerRef.current) return;
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      
+      // Temporarily hide map controls for cleaner screenshot
+      const controls = mapContainerRef.current.querySelectorAll('.leaflet-control-container');
+      controls.forEach(c => { c.style.display = 'none'; });
+      
+      const canvas = await html2canvas(mapContainerRef.current, {
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#0f172a',
+      });
+      
+      // Restore controls
+      controls.forEach(c => { c.style.display = ''; });
+
+      const link = document.createElement('a');
+      link.download = `pmis_map_${new Date().toISOString().split('T')[0]}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      
+      if (addToast) addToast('success', 'Map Exported', 'Saved map as PNG image.');
+    } catch (err) {
+      console.error("PNG export failed:", err);
+      if (addToast) addToast('error', 'Export Failed', 'Could not export map as PNG.');
+    }
+  };
+
   return (
     <div style={{
       display: 'flex',
@@ -739,6 +939,7 @@ export default function MapTab({
               onChange={e => setColorMetric(e.target.value)}
               style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4 }}
             >
+              <option value="red">Solid Red (Location Only)</option>
               <option value="condition">Condition Score</option>
               <option value="distress">Distress Score</option>
               <option value="ride">Ride Score</option>
@@ -793,6 +994,7 @@ export default function MapTab({
               onChange={e => setSelectedBasemap(e.target.value)}
               style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4 }}
             >
+              <option value="txdot">TxDOT Planning (Gray)</option>
               <option value="dark">Dark Matter (CARTO)</option>
               <option value="voyager">Voyager (CARTO)</option>
               <option value="satellite">Satellite Hybrid</option>
@@ -815,6 +1017,54 @@ export default function MapTab({
               <option value="selected">Selected Only</option>
               <option value="faint">Faint Neutral Dots</option>
             </select>
+          </div>
+
+          <div style={{ width: 1, height: 18, background: 'var(--border-default)' }} />
+
+          {/* Section Display Style */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Style:</span>
+            <select
+              className="select-input"
+              value={sectionStyle}
+              onChange={e => setSectionStyle(e.target.value)}
+              style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4 }}
+            >
+              <option value="dots">Dots</option>
+              <option value="lines">Polylines</option>
+            </select>
+            {sectionStyle === 'dots' && (
+              <input 
+                type="range" 
+                min="3" max="15" 
+                value={dotSize} 
+                onChange={e => setDotSize(parseInt(e.target.value))}
+                title={`Dot Size: ${dotSize}`}
+                style={{ width: 60, marginLeft: 4 }}
+              />
+            )}
+          </div>
+
+          <div style={{ width: 1, height: 18, background: 'var(--border-default)' }} />
+
+          {/* TxDOT Overlays */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input 
+                type="checkbox" 
+                checked={showDistricts} 
+                onChange={e => setShowDistricts(e.target.checked)} 
+              />
+              Districts
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input 
+                type="checkbox" 
+                checked={showCounties} 
+                onChange={e => setShowCounties(e.target.checked)} 
+              />
+              Counties
+            </label>
           </div>
 
           <div style={{ width: 1, height: 18, background: 'var(--border-default)' }} />
@@ -852,6 +1102,18 @@ export default function MapTab({
           >
             <span>🎯</span>
             <span>Fit All</span>
+          </button>
+
+          {/* Export PNG */}
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            onClick={handleExportPng}
+            title="Export map view as PNG image"
+            style={{ gap: 5, fontSize: 12, padding: '5px 10px' }}
+          >
+            <span>📸</span>
+            <span>PNG</span>
           </button>
 
           {/* GIS Export Button */}
@@ -1111,10 +1373,10 @@ export default function MapTab({
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {[
                       { label: 'Very Good', score: colorMetric === 'ride' ? '4.0 – 5.0' : '90 – 100', color: CATEGORY_COLORS['Very Good'] },
-                      { label: 'Good',      score: colorMetric === 'ride' ? '3.0 – 3.9' : (colorMetric === 'distress' ? '80 – 89' : '70 – 89'), color: CATEGORY_COLORS['Good'] },
-                      { label: 'Fair',      score: colorMetric === 'ride' ? '2.0 – 2.9' : (colorMetric === 'distress' ? '70 – 79' : '50 – 69'), color: CATEGORY_COLORS['Fair'] },
-                      { label: 'Poor',      score: colorMetric === 'ride' ? '1.0 – 1.9' : (colorMetric === 'distress' ? '60 – 69' : '35 – 49'), color: CATEGORY_COLORS['Poor'] },
-                      { label: 'Very Poor', score: colorMetric === 'ride' ? '0.1 – 0.9' : (colorMetric === 'distress' ? '1 – 59'  : '1 – 34'),  color: CATEGORY_COLORS['Very Poor'] },
+                      { label: 'Good', score: colorMetric === 'ride' ? '3.0 – 3.9' : (colorMetric === 'distress' ? '80 – 89' : '70 – 89'), color: CATEGORY_COLORS['Good'] },
+                      { label: 'Fair', score: colorMetric === 'ride' ? '2.0 – 2.9' : (colorMetric === 'distress' ? '70 – 79' : '50 – 69'), color: CATEGORY_COLORS['Fair'] },
+                      { label: 'Poor', score: colorMetric === 'ride' ? '1.0 – 1.9' : (colorMetric === 'distress' ? '60 – 69' : '35 – 49'), color: CATEGORY_COLORS['Poor'] },
+                      { label: 'Very Poor', score: colorMetric === 'ride' ? '0.1 – 0.9' : (colorMetric === 'distress' ? '1 – 59' : '1 – 34'), color: CATEGORY_COLORS['Very Poor'] },
                     ].map(item => (
                       <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1162,10 +1424,7 @@ export default function MapTab({
                   </div>
                 )}
 
-                {/* Roadbed indicator line */}
-                <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: 10, color: '#94a3b8' }}>
-                  🟢 Start Point • 🔴 End Point
-                </div>
+
               </div>
             )}
           </div>

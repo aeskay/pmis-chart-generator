@@ -1,0 +1,20 @@
+.district-map-label {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #94a3b8 !important; /* light slate */
+  font-weight: bold;
+  font-size: 14px;
+  text-shadow: 1px 1px 2px white, -1px -1px 2px white, 1px -1px 2px white, -1px 1px 2px white;
+}
+
+.county-map-label {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #cbd5e1 !important; /* lighter slate */
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  text-shadow: 1px 1px 1px white, -1px -1px 1px white, 1px -1px 1px white, -1px 1px 1px white;
+}

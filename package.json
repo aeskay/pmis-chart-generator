@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "firebase": "^12.19.0",
+    "html2canvas": "^1.4.1",
     "idb-keyval": "^6.3.0",
     "jszip": "^3.10.2",
     "leaflet": "^1.9.4",
