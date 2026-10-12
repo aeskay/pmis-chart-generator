@@ -101,7 +101,9 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
       y: truckAadt,
       text: data.truckPct.map(v => (v !== null && v !== undefined) ? `${v.toFixed(1)}%` : ''),
       textposition: 'outside',
-      textfont: { size: 10, color: '#b91c1c' },
+      textangle: -90,
+      constraintext: 'none',
+      textfont: { size: 11, color: '#991b1b' },
       cliponaxis: false,
       marker: { color: '#dc2626', line: { color: '#000000', width: 1 } },
       yaxis: 'y',
@@ -117,6 +119,7 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
     height: 420,
     barmode: 'group',
     hovermode: 'x unified',
+    uniformtext: { mode: 'show', minsize: 10 },
     legend: {
       orientation: 'h', yanchor: 'top', y: -0.27, xanchor: 'center', x: 0.5,
       font: { size: 12 }, bordercolor: '#000', borderwidth: 1,
