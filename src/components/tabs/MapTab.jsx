@@ -164,9 +164,12 @@ export default function MapTab({
     if (!sections?.length) return map;
 
     sections.forEach(s => {
-      // Evaluate latest scores for R, L, and aggregate
+      // Evaluate latest scores for R, L, K, and aggregate
       const evalR = pmisMap ? buildEvalData(pmisMap, s, 'R') : null;
       const evalL = pmisMap ? buildEvalData(pmisMap, s, 'L') : null;
+      const evalKR = pmisMap ? buildEvalData(pmisMap, s, 'K(R)') : null;
+      const evalKL = pmisMap ? buildEvalData(pmisMap, s, 'K(L)') : null;
+      const evalK = pmisMap ? buildEvalData(pmisMap, s, 'K') : null;
       const evalGen = pmisMap ? buildEvalData(pmisMap, s, '') : null;
 
       const extractLatest = (evalObj) => {
@@ -180,14 +183,18 @@ export default function MapTab({
         };
       };
 
-      const scoreR = extractLatest(evalR);
-      const scoreL = extractLatest(evalL);
+      const scoreR = extractLatest(evalR) || extractLatest(evalKR);
+      const scoreL = extractLatest(evalL) || extractLatest(evalKL);
+      const scoreK = extractLatest(evalK) || extractLatest(evalKR) || extractLatest(evalKL);
       const scoreGen = extractLatest(evalGen);
 
       map.set(s.id, {
         R: scoreR || scoreGen,
         L: scoreL || scoreGen,
-        overall: scoreGen || scoreR || scoreL || null,
+        K: scoreK || scoreGen || scoreR || scoreL,
+        'K(R)': extractLatest(evalKR) || scoreR || scoreGen,
+        'K(L)': extractLatest(evalKL) || scoreL || scoreGen,
+        overall: scoreGen || scoreK || scoreR || scoreL || null,
       });
     });
 
@@ -414,11 +421,13 @@ export default function MapTab({
   const getLineColor = (section, roadbed) => {
     if (colorMetric === 'red') return '#ef4444'; // Red
     if (colorMetric === 'roadbed') {
-      return roadbed === 'R' ? ROADBED_COLORS.R : (roadbed === 'L' ? ROADBED_COLORS.L : ROADBED_COLORS.K);
+      if (roadbed === 'R' || roadbed === 'K(R)') return ROADBED_COLORS.R;
+      if (roadbed === 'L' || roadbed === 'K(L)') return ROADBED_COLORS.L;
+      return ROADBED_COLORS.K;
     }
 
     const scores = sectionScores.get(section.id);
-    const scoreObj = scores ? (roadbed === 'R' ? scores.R : scores.L) || scores.overall : null;
+    const scoreObj = scores ? (scores[roadbed] || scores.overall) : null;
 
     if (colorMetric === 'condition') {
       const score = scoreObj?.condition;
@@ -468,12 +477,28 @@ export default function MapTab({
       const c = section.coordinates;
       const secLayers = [];
 
+      const { explicitSuffix } = parseHighwayComponents(section.highway);
+      const isUndivided = c.R?.isUndivided || c.L?.isUndivided || explicitSuffix === 'K' || c.K?.available;
+
       const bedsToRender = [];
-      if ((roadbedFilter === 'both' || roadbedFilter === 'R') && c.R?.available) {
-        bedsToRender.push({ letter: 'R', data: c.R, label: 'Roadbed R (Inventory)' });
-      }
-      if ((roadbedFilter === 'both' || roadbedFilter === 'L') && c.L?.available) {
-        bedsToRender.push({ letter: 'L', data: c.L, label: 'Roadbed L (Opposing)' });
+      if (isUndivided) {
+        if (roadbedFilter === 'both' || roadbedFilter === 'K') {
+          const data = c.K?.available ? c.K : (c.R?.available ? c.R : c.L);
+          if (data?.available) {
+            bedsToRender.push({ letter: 'K', data, label: 'Roadbed K (Undivided)' });
+          }
+        } else if (roadbedFilter === 'R' && c.R?.available) {
+          bedsToRender.push({ letter: 'K(R)', data: c.R, label: 'Roadbed K(R)' });
+        } else if (roadbedFilter === 'L' && (c.L?.available || c.R?.available)) {
+          bedsToRender.push({ letter: 'K(L)', data: c.L?.available ? c.L : c.R, label: 'Roadbed K(L)' });
+        }
+      } else {
+        if ((roadbedFilter === 'both' || roadbedFilter === 'R') && c.R?.available) {
+          bedsToRender.push({ letter: 'R', data: c.R, label: 'Roadbed R (Inventory)' });
+        }
+        if ((roadbedFilter === 'both' || roadbedFilter === 'L') && c.L?.available) {
+          bedsToRender.push({ letter: 'L', data: c.L, label: 'Roadbed L (Opposing)' });
+        }
       }
 
       bedsToRender.forEach(({ letter, data, label }) => {
@@ -519,7 +544,7 @@ export default function MapTab({
 
         // Popup Content
         const scores = sectionScores.get(section.id);
-        const sObj = (letter === 'R' ? scores?.R : scores?.L) || scores?.overall;
+        const sObj = scores ? (scores[letter] || scores.overall) : null;
 
         const condScore = sObj?.condition ? sObj.condition.toFixed(1) : '—';
         const condCat = sObj?.condition ? getConditionCategory(sObj.condition) : null;
@@ -960,32 +985,17 @@ export default function MapTab({
           {/* Roadbed Filter Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
             <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Roadbeds:</span>
-            <div style={{ display: 'inline-flex', borderRadius: 4, overflow: 'hidden', border: '1px solid var(--border-default)' }}>
-              <button
-                type="button"
-                className={`btn btn--sm ${roadbedFilter === 'both' ? 'btn--primary' : 'btn--ghost'}`}
-                onClick={() => setRoadbedFilter('both')}
-                style={{ padding: '3px 8px', fontSize: 12, borderRadius: 0 }}
-              >
-                Both (R & L)
-              </button>
-              <button
-                type="button"
-                className={`btn btn--sm ${roadbedFilter === 'R' ? 'btn--primary' : 'btn--ghost'}`}
-                onClick={() => setRoadbedFilter('R')}
-                style={{ padding: '3px 8px', fontSize: 12, borderRadius: 0 }}
-              >
-                R Only
-              </button>
-              <button
-                type="button"
-                className={`btn btn--sm ${roadbedFilter === 'L' ? 'btn--primary' : 'btn--ghost'}`}
-                onClick={() => setRoadbedFilter('L')}
-                style={{ padding: '3px 8px', fontSize: 12, borderRadius: 0 }}
-              >
-                L Only
-              </button>
-            </div>
+            <select
+              className="select-input"
+              value={roadbedFilter}
+              onChange={e => setRoadbedFilter(e.target.value)}
+              style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4 }}
+            >
+              <option value="both">Both (R & L) / All</option>
+              <option value="R">R Only</option>
+              <option value="L">L Only</option>
+              <option value="K">K Only</option>
+            </select>
           </div>
 
           {/* Basemap Selector */}
