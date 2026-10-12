@@ -468,3 +468,60 @@ export function getSectionDiagnostics(pmisMap, section) {
     nearbyHighways,
   };
 }
+
+// ─── Heatmap ─────────────────────────────────────────────────────────
+
+/**
+ * Build 2D grid data for Plotly heatmap visualization of a section.
+ *
+ * @param {Map<string, Object[]>} pmisMap
+ * @param {Object} section
+ * @param {string} metric
+ * @param {string} suffix
+ */
+export function buildHeatmapData(pmisMap, section, metric = 'conditionScore', suffix = '') {
+  const records = getOverlapping(pmisMap, section, suffix);
+  if (!records.length) return null;
+
+  const start = parseFloat(section.beginRef);
+  const end   = parseFloat(section.endRef);
+
+  // Collect all unique boundary points (start and end) from all overlapping PMIS records
+  const refSet = new Set();
+  const yearsSet = new Set();
+
+  records.forEach(r => {
+    refSet.add(r.startRef);
+    refSet.add(r.endRef);
+    yearsSet.add(r.year);
+  });
+
+  const xEdges = Array.from(refSet).sort((a, b) => a - b);
+  const years = Array.from(yearsSet).sort((a, b) => a - b);
+
+  // z is a 2D array: z[year_index][x_index]
+  const z = [];
+
+  for (const year of years) {
+    const yearRecords = records.filter(r => r.year === year);
+    const row = [];
+    
+    // For each bin/block between [xEdges[i], xEdges[i+1]]
+    for (let i = 0; i < xEdges.length - 1; i++) {
+      const mid = (xEdges[i] + xEdges[i+1]) / 2;
+      const rec = yearRecords.find(r => r.startRef <= mid && r.endRef >= mid);
+      if (rec && rec[metric] !== null && rec[metric] !== undefined) {
+        row.push(rec[metric]);
+      } else {
+        row.push(null);
+      }
+    }
+    z.push(row);
+  }
+
+  return {
+    x: xEdges, // length N+1 (boundaries for heatmap blocks)
+    y: years,  // length M
+    z: z       // size M x N
+  };
+}

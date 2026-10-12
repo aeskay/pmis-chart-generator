@@ -89,7 +89,7 @@ export default function DistressTab({
     setExcludedSectionIds(new Set());
     try {
       localStorage.setItem('pmis_distress_excluded_sections', JSON.stringify([]));
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const excludeAllSections = () => {
@@ -97,7 +97,7 @@ export default function DistressTab({
     setExcludedSectionIds(new Set(allIds));
     try {
       localStorage.setItem('pmis_distress_excluded_sections', JSON.stringify(allIds));
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const invertSectionSelection = () => {
@@ -233,7 +233,7 @@ export default function DistressTab({
     const totalAges = aggData.xLabels.length;
     const maxAge = Math.max(...aggData.xLabels);
     const minAge = Math.min(...aggData.xLabels);
-    
+
     // Find peak total distress and individual peak distresses
     let maxDistress = -1;
     let peakX = null;
@@ -483,7 +483,7 @@ export default function DistressTab({
       ticks: 'inside',
     },
     yaxis: {
-      title: { text: '<b>Avg. distress per centerline mile</b>', font: { size: 15, color: '#000' } },
+      title: { text: '<b>Avg. distress per lane mile</b>', font: { size: 15, color: '#000' } },
       range: [effectiveYMin, effectiveYMax],
       dtick: effectiveYStep,
       tickfont: { size: 12, color: '#000' },
@@ -854,8 +854,8 @@ export default function DistressTab({
               stats.validUnits > stats.validSections
                 ? `${stats.validUnits} roadbed units (L & R)`
                 : (excludedSectionIds.size > 0
-                    ? `${excludedSectionIds.size} excluded manually`
-                    : (alignMode === 'age' ? 'With construction year' : 'With PMIS data'))
+                  ? `${excludedSectionIds.size} excluded manually`
+                  : (alignMode === 'age' ? 'With construction year' : 'With PMIS data'))
             }
             accent={excludedSectionIds.size > 0 ? 'var(--warning)' : 'var(--accent-secondary)'}
           />
@@ -877,8 +877,8 @@ export default function DistressTab({
               roadbedFilter === 'R'
                 ? 'Filtered to R roadbeds'
                 : roadbedFilter === 'L'
-                ? 'Filtered to L roadbeds'
-                : 'Sections matching L and R'
+                  ? 'Filtered to L roadbeds'
+                  : 'Sections matching L and R'
             }
             accent="#a855f7"
           />

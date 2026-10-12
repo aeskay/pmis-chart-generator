@@ -16,6 +16,7 @@ import DistributionTab from './components/tabs/DistributionTab';
 import ChartsTab from './components/tabs/ChartsTab';
 import DataTab from './components/tabs/DataTab';
 import MapTab from './components/tabs/MapTab';
+import HeatmapTab from './components/tabs/HeatmapTab';
 import ToastContainer from './components/ToastContainer';
 import NewProjectModal from './components/modals/NewProjectModal';
 import OpenProjectsModal from './components/modals/OpenProjectsModal';
@@ -51,6 +52,7 @@ const TABS = [
   { id: 'distribution', label: 'Distribution', icon: '📉' },
   { id: 'charts',       label: 'Charts',       icon: '📊' },
   { id: 'data',         label: 'Data',         icon: '📋' },
+  { id: 'heatmap',      label: 'Heatmap',      icon: '🔥' },
   { id: 'map',          label: 'Map',          icon: '🗺️' },
 ];
 
@@ -671,7 +673,13 @@ export default function App() {
 
   const handleSelectSection = useCallback((id) => {
     setSelectedSectionId(id);
-    setActiveTab('condition');
+    setActiveTab(prev => {
+      // If we are on a project-level tab, switch to condition to view the section
+      if (['data', 'charts', 'map', 'distribution'].includes(prev)) {
+        return 'condition';
+      }
+      return prev; // Stay on condition, distress, or heatmap
+    });
   }, []);
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -838,6 +846,13 @@ export default function App() {
                 projectName={selectedProject?.name}
                 onOpenProjectExport={() => setShowExportProjectModal(true)}
                 addToast={addToast}
+              />
+            )}
+            {activeTab === 'heatmap' && (
+              <HeatmapTab
+                section={selectedSection}
+                pmisMap={pmisMap}
+                pmisLoading={pmisLoading}
               />
             )}
             {activeTab === 'map' && (
