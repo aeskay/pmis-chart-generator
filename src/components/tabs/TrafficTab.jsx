@@ -99,9 +99,13 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
       name: 'Avg. Truck AADT',
       x: data.years,
       y: truckAadt,
+      text: data.truckPct.map(v => (v !== null && v !== undefined) ? `${v.toFixed(1)}%` : ''),
+      textposition: 'outside',
+      textfont: { size: 10, color: '#b91c1c' },
+      cliponaxis: false,
       marker: { color: '#dc2626', line: { color: '#000000', width: 1 } },
       yaxis: 'y',
-      hovertemplate: 'Year: %{x}<br>Truck AADT: %{y:,.0f}<extra></extra>',
+      hovertemplate: 'Year: %{x}<br>Truck AADT: %{y:,.0f}<br>Truck %: %{text}<extra></extra>',
     },
   ];
 
