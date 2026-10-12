@@ -938,8 +938,8 @@ export default function DistressTab({
             </h2>
             <p className="chart-panel__sub" style={{ color: '#555555', marginBottom: 0 }}>
               {alignMode === 'age'
-                ? 'Apportioned distress per centerline mile aligned by section age (Years Since Construction)'
-                : 'Apportioned distress per centerline mile grouped by PMIS evaluation calendar year'}
+                ? 'Apportioned distress per lane mile aligned by section age (Years Since Construction)'
+                : 'Apportioned distress per lane mile grouped by PMIS evaluation calendar year'}
               {slabThFilter !== 'all' ? ` · Filtered to ${slabThFilter}" slab thickness` : ''}
               {scope === 'selected' && selectedSection ? ` · Section ${selectedSection.id} (${selectedSection.highway})` : ` · Project: ${project?.name || 'All Sections'}`}
               {excludedSectionIds.size > 0 && (

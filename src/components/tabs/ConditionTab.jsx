@@ -115,7 +115,7 @@ function buildDistLayout(section, distData) {
       showline: true, linewidth: 2, linecolor: '#000', mirror: true, ticks: 'inside',
     },
     yaxis: {
-      title: { text: '<b>Avg. distress per centerline mile</b>', font: { size: 13 } },
+      title: { text: '<b>Avg. distress per lane mile</b>', font: { size: 13 } },
       range: [0, yMax],
       tickvals: tickVals,
       tickfont: { size: 12 },
@@ -314,7 +314,7 @@ function RoadbedCharts({ section, pmisMap, suffix }) {
       <div className="chart-panel">
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
           <div>
-            <div className="chart-panel__title">Distress Counts per Centerline Mile{titleSuffix}</div>
+            <div className="chart-panel__title">Distress Counts per Lane Mile{titleSuffix}</div>
             <div className="chart-panel__sub" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
               <span>
                 <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>RM (Actual):</span>{' '}
