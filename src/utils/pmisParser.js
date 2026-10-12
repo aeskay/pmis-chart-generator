@@ -7,7 +7,7 @@
  */
 
 import Papa from 'papaparse';
-import { cleanDistrictString, normalizeHighway } from './normalizers';
+import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from './normalizers';
 
 /**
  * Parse PMIS CSV text into a lookup map.
@@ -45,9 +45,25 @@ export function parsePmisCSV(csvText, { onProgress } = {}) {
           const keys = Object.keys(row);
           const find = (keywords) => keys.find(k => keywords.some(kw => k.toUpperCase().includes(kw))) || keywords[0];
           
+          const findHighwayCol = () => {
+            const uKeys = keys.map(k => ({ raw: k, up: k.toUpperCase().trim() }));
+            const m1 = uKeys.find(k => (k.up.includes('SIGNED HWY') || k.up.includes('SIGNED HIGHWAY')) && !k.up.endsWith('ROADBED ID'));
+            if (m1) return m1.raw;
+            const m2 = uKeys.find(k => (k.up.includes('HIGHWAY') || k.up.includes('HWY')) && !k.up.includes('ROADBED ID'));
+            if (m2) return m2.raw;
+            return find(['SIGNED HWY AND ROADBED ID', 'HIGHWAY ROADBED', 'HWY', 'ROADBED']);
+          };
+
+          const findRoadbedIdCol = () => {
+            const uKeys = keys.map(k => ({ raw: k, up: k.toUpperCase().trim() }));
+            const m = uKeys.find(k => k.up === 'HIGHWAY ROADBED ID' || k.up.endsWith('ROADBED ID') || k.up.includes('HIGHWAY ROADBED ID'));
+            return m ? m.raw : null;
+          };
+
           colMap = {
             year: find(['FISCAL YEAR', 'YEAR', 'FY']),
-            highway: find(['SIGNED HWY AND ROADBED ID', 'HIGHWAY ROADBED', 'HWY', 'ROADBED']),
+            highway: findHighwayCol(),
+            roadbedId: findRoadbedIdCol(),
             district: find(['RESPONSIBLE DISTRICT', 'DISTRICT', 'DIST']),
             beginTrm: find(['BEGINNING TRM NUMBER', 'BEG TRM', 'BEGIN TRM', 'BEGINNING TRM', 'BEGIN REF', 'START REF']),
             beginDisp: find(['BEGINNING TRM DISPLACEMENT', 'BEG TRM DISP', 'BEGIN DISP', 'BEG DISP']),
@@ -75,8 +91,32 @@ export function parsePmisCSV(csvText, { onProgress } = {}) {
         const highway = normalizeHighway(rawHighway);
         if (!highway) return;
 
+        const { base, explicitSuffix } = parseHighwayComponents(highway);
+        const rawRoadbedId = colMap.roadbedId ? String(row[colMap.roadbedId] || '').trim().toUpperCase() : '';
+
+        let finalSuffix = explicitSuffix || '';
+
+        // Handle single roadbed 'K':
+        // Lanes 1,2,3,4,5 -> K(R); lanes 0,6,7,8,9 -> K(L); letter "K" or non-digit -> ignore
+        const isKRoadbed = explicitSuffix === 'K' || rawRoadbedId === 'K' || rawRoadbedId.startsWith('K');
+        if (isKRoadbed) {
+          const digitMatch = rawRoadbedId.match(/\d/);
+          if (!digitMatch) {
+            // Letter (like "K") or no lane digit — ignore per user instructions
+            return;
+          }
+          const laneDigit = digitMatch[0];
+          if (['1', '2', '3', '4', '5'].includes(laneDigit)) {
+            finalSuffix = 'K(R)';
+          } else if (['0', '6', '7', '8', '9'].includes(laneDigit)) {
+            finalSuffix = 'K(L)';
+          } else {
+            return; // Ignore other unrecognized lane digits
+          }
+        }
+
         const district = cleanDistrictString(row[colMap.district] || '');
-        const key = `${district}|${highway}`;
+        const key = `${district}|${base}${finalSuffix}`;
 
         // Parse reference markers
         const beginTrm  = parseFloat(row[colMap.beginTrm])  || 0;

@@ -107,15 +107,15 @@ export function buildDistributionData(pmisMap, sections = [], options = {}) {
   }
 
   // 2. Determine active roadbeds
-  let activeSuffixes = ['R', 'L'];
+  let activeSuffixes = ['R', 'L', 'K(R)', 'K(L)'];
   if (roadbedFilter === 'LR') {
-    activeSuffixes = ['R', 'L'];
+    activeSuffixes = ['R', 'L', 'K(R)', 'K(L)'];
   } else if (roadbedFilter === 'R') {
-    activeSuffixes = ['R'];
+    activeSuffixes = ['R', 'K(R)'];
   } else if (roadbedFilter === 'L') {
-    activeSuffixes = ['L'];
+    activeSuffixes = ['L', 'K(L)'];
   } else if (roadbedFilter === 'all') {
-    activeSuffixes = ['R', 'L', '', 'K', 'A'];
+    activeSuffixes = ['R', 'L', 'K(R)', 'K(L)', '', 'K', 'A'];
   }
 
   const sectionUnits = []; // List of individual section-roadbed records with latest scores
@@ -125,7 +125,9 @@ export function buildDistributionData(pmisMap, sections = [], options = {}) {
 
     // If section highway has an explicit suffix (e.g. IH 0020 L), check if it matches filter
     const suffixesToCheck = explicitSuffix
-      ? (activeSuffixes.includes(explicitSuffix) ? [explicitSuffix] : [])
+      ? (explicitSuffix === 'K'
+          ? (roadbedFilter === 'R' ? ['K(R)'] : roadbedFilter === 'L' ? ['K(L)'] : ['K(R)', 'K(L)'])
+          : (activeSuffixes.includes(explicitSuffix) ? [explicitSuffix] : []))
       : activeSuffixes;
 
     for (const sfx of suffixesToCheck) {

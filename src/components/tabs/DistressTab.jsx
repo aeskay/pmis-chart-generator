@@ -872,7 +872,7 @@ export default function DistressTab({
           />
           <InfoMetric
             label="Roadbed Breakdown"
-            value={`L: ${stats.roadbedCounts['L'] || 0}  |  R: ${stats.roadbedCounts['R'] || 0}`}
+            value={`L: ${(stats.roadbedCounts['L'] || 0) + (stats.roadbedCounts['K(L)'] || 0)}  |  R: ${(stats.roadbedCounts['R'] || 0) + (stats.roadbedCounts['K(R)'] || 0)}`}
             sub={
               roadbedFilter === 'R'
                 ? 'Filtered to R roadbeds'

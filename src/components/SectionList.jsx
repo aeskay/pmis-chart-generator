@@ -4,7 +4,7 @@
  * Supports manual adding, CSV import, inline editing, and deleting.
  */
 import React, { useState, useRef } from 'react';
-import { cleanDistrictString, normalizeHighway } from '../utils/normalizers';
+import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from '../utils/normalizers';
 import ColumnMappingModal from './modals/ColumnMappingModal';
 import AddSectionModal from './modals/AddSectionModal';
 
@@ -21,8 +21,15 @@ function getDirectionSuffix(highway) {
 
 function checkHasPmis(pmisMap, section) {
   if (!pmisMap) return null; // PMIS not loaded yet
-  const key = `${cleanDistrictString(section.district)}|${normalizeHighway(section.highway)}`;
-  return pmisMap.has(key) || pmisMap.has(key + 'R') || pmisMap.has(key + 'K') || pmisMap.has(key + 'L') || pmisMap.has(key + 'A');
+  const { base } = parseHighwayComponents(section.highway);
+  const baseKey = `${cleanDistrictString(section.district)}|${base}`;
+  return pmisMap.has(baseKey) ||
+         pmisMap.has(baseKey + 'R') ||
+         pmisMap.has(baseKey + 'L') ||
+         pmisMap.has(baseKey + 'K(R)') ||
+         pmisMap.has(baseKey + 'K(L)') ||
+         pmisMap.has(baseKey + 'K') ||
+         pmisMap.has(baseKey + 'A');
 }
 
 export default function SectionList({

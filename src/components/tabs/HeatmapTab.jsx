@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import PlotlyChart from '../PlotlyChart';
 import { buildHeatmapData } from '../../utils/chartBuilder';
-import { cleanDistrictString, normalizeHighway } from '../../utils/normalizers';
+import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from '../../utils/normalizers';
 
 const METRICS = [
   { id: 'conditionScore', label: 'Condition Score', zmin: 0, zmax: 100 },
@@ -39,13 +39,16 @@ export default function HeatmapTab({ section, pmisMap, pmisLoading }) {
 
   const availableRoadbeds = useMemo(() => {
     if (!pmisMap || !section) return [];
-    const baseKey = `${cleanDistrictString(section.district)}|${normalizeHighway(section.highway)}`;
+    const { base } = parseHighwayComponents(section.highway);
+    const baseKey = `${cleanDistrictString(section.district)}|${base}`;
     const beds = [];
-    if (pmisMap.has(baseKey)) beds.push({ label: 'Main/None', val: '' });
-    if (pmisMap.has(baseKey + 'R')) beds.push({ label: 'R', val: 'R' });
-    if (pmisMap.has(baseKey + 'L')) beds.push({ label: 'L', val: 'L' });
-    if (pmisMap.has(baseKey + 'K')) beds.push({ label: 'K', val: 'K' });
-    if (pmisMap.has(baseKey + 'A')) beds.push({ label: 'A', val: 'A' });
+    if (pmisMap.has(baseKey))          beds.push({ label: 'Main/None', val: '' });
+    if (pmisMap.has(baseKey + 'R'))    beds.push({ label: 'R', val: 'R' });
+    if (pmisMap.has(baseKey + 'L'))    beds.push({ label: 'L', val: 'L' });
+    if (pmisMap.has(baseKey + 'K(R)')) beds.push({ label: 'K(R)', val: 'K(R)' });
+    if (pmisMap.has(baseKey + 'K(L)')) beds.push({ label: 'K(L)', val: 'K(L)' });
+    if (pmisMap.has(baseKey + 'K'))    beds.push({ label: 'K', val: 'K' });
+    if (pmisMap.has(baseKey + 'A'))    beds.push({ label: 'A', val: 'A' });
     return beds;
   }, [pmisMap, section]);
 

@@ -6,27 +6,11 @@
  * buildDistressData — apportioned distress counts per centerline mile
  */
 
-import { cleanDistrictString, normalizeHighway } from './normalizers';
+import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from './normalizers';
+
+export { parseHighwayComponents };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Parses highway into base name and roadbed suffix (e.g., 'SH190R' -> base: 'SH190', explicitSuffix: 'R')
- */
-export function parseHighwayComponents(highwayStr) {
-  const norm = normalizeHighway(highwayStr || '');
-  const match = norm.match(/^([A-Z]+\d+)([RLKAXY])?$/);
-  if (match) {
-    return {
-      base: match[1],
-      explicitSuffix: match[2] || '',
-    };
-  }
-  return {
-    base: norm,
-    explicitSuffix: '',
-  };
-}
 
 /**
  * Build the map lookup key from a section object, avoiding double suffixes.
@@ -286,7 +270,7 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
   const aggByX = new Map(); // x -> { acp: 0, pcc: 0, punch: 0, spall: 0, totalLen: 0, sectionIds: Set<unitId> }
   const validSectionIds = new Set();
   const validBaseSectionIds = new Set();
-  const roadbedCounts = { R: 0, L: 0, '': 0, K: 0, A: 0 };
+  const roadbedCounts = { R: 0, L: 0, 'K(R)': 0, 'K(L)': 0, '': 0, K: 0, A: 0 };
 
   for (const section of sections) {
     const district = cleanDistrictString(section.district || '');
@@ -300,13 +284,23 @@ export function buildAggregateDistressData(pmisMap, sections, alignMode = 'age',
     if (alignMode === 'age' && (isNaN(yearConst) || yearConst <= 1900)) continue;
 
     // Determine which roadbed suffixes to query for this section
-    let activeSuffixes = ['R', 'L'];
+    let activeSuffixes = ['R', 'L', 'K(R)', 'K(L)'];
     if (explicitSuffix) {
-      activeSuffixes = [explicitSuffix];
+      if (explicitSuffix === 'K') {
+        if (specificRoadbed === 'R') activeSuffixes = ['K(R)'];
+        else if (specificRoadbed === 'L') activeSuffixes = ['K(L)'];
+        else activeSuffixes = ['K(R)', 'K(L)'];
+      } else {
+        activeSuffixes = [explicitSuffix];
+      }
     } else if (specificRoadbed === 'LR') {
-      activeSuffixes = ['L', 'R'];
+      activeSuffixes = ['L', 'R', 'K(R)', 'K(L)'];
+    } else if (specificRoadbed === 'R') {
+      activeSuffixes = ['R', 'K(R)'];
+    } else if (specificRoadbed === 'L') {
+      activeSuffixes = ['L', 'K(L)'];
     } else if (specificRoadbed === 'all') {
-      activeSuffixes = ['R', 'L', '', 'K', 'A'];
+      activeSuffixes = ['R', 'L', 'K(R)', 'K(L)', '', 'K', 'A'];
     } else {
       activeSuffixes = [specificRoadbed];
     }
@@ -445,11 +439,12 @@ export function getSectionDiagnostics(pmisMap, section) {
   if (!pmisMap || !section) return null;
 
   const district = cleanDistrictString(section.district || '');
-  const highwayNorm = normalizeHighway(section.highway || '');
+  const { base } = parseHighwayComponents(section.highway);
+  const highwayNorm = base;
   const start = parseFloat(section.beginRef);
   const end = parseFloat(section.endRef);
 
-  const potentialSuffixes = ['', 'R', 'L', 'K', 'A', 'X', 'Y'];
+  const potentialSuffixes = ['', 'R', 'L', 'K(R)', 'K(L)', 'K', 'A', 'X', 'Y'];
   const roadbedMatches = [];
 
   for (const sfx of potentialSuffixes) {

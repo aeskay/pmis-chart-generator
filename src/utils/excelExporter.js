@@ -5,7 +5,7 @@
 
 import * as XLSX from 'xlsx';
 import { buildEvalData, buildDistressData } from './chartBuilder';
-import { cleanDistrictString, normalizeHighway } from './normalizers';
+import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from './normalizers';
 
 /**
  * Format reference marker to 3 decimal places
@@ -30,13 +30,16 @@ function roundVal(val, decimals = 2) {
  */
 export function getSectionRoadbeds(pmisMap, section) {
   if (!pmisMap || !section) return [''];
-  const baseKey = `${cleanDistrictString(section.district)}|${normalizeHighway(section.highway)}`;
+  const { base } = parseHighwayComponents(section.highway);
+  const baseKey = `${cleanDistrictString(section.district)}|${base}`;
   const beds = [];
-  if (pmisMap.has(baseKey)) beds.push('');
-  if (pmisMap.has(baseKey + 'R')) beds.push('R');
-  if (pmisMap.has(baseKey + 'L')) beds.push('L');
-  if (pmisMap.has(baseKey + 'K')) beds.push('K');
-  if (pmisMap.has(baseKey + 'A')) beds.push('A');
+  if (pmisMap.has(baseKey))          beds.push('');
+  if (pmisMap.has(baseKey + 'R'))    beds.push('R');
+  if (pmisMap.has(baseKey + 'L'))    beds.push('L');
+  if (pmisMap.has(baseKey + 'K(R)')) beds.push('K(R)');
+  if (pmisMap.has(baseKey + 'K(L)')) beds.push('K(L)');
+  if (pmisMap.has(baseKey + 'K'))    beds.push('K');
+  if (pmisMap.has(baseKey + 'A'))    beds.push('A');
   return beds.length > 0 ? beds : [''];
 }
 

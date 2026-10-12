@@ -27,7 +27,7 @@ export function normalizeHighway(val) {
   if (val === null || val === undefined) return '';
   let s = String(val).toUpperCase().trim();
   s = s.replace(/[\s-]/g, '');
-  const match = s.match(/^([A-Z]+)0*(\d+)([A-Z]*)$/);
+  const match = s.match(/^([A-Z]+)0*(\d+)(K\([RL]\)|[A-Z]*)$/);
   if (match) {
     return `${match[1]}${match[2]}${match[3]}`;
   }
@@ -43,3 +43,25 @@ export function normalizeHighway(val) {
 export function buildKey(district, highway) {
   return `${cleanDistrictString(district)}|${normalizeHighway(highway)}`;
 }
+
+/**
+ * Parses highway into base name and roadbed suffix
+ * (e.g., 'SH190R' -> base: 'SH190', explicitSuffix: 'R', 'SH190K(R)' -> explicitSuffix: 'K(R)')
+ * @param {string} highwayStr
+ * @returns {{ base: string, explicitSuffix: string }}
+ */
+export function parseHighwayComponents(highwayStr) {
+  const norm = normalizeHighway(highwayStr || '');
+  const match = norm.match(/^([A-Z]+\d+)(K\([RL]\)|[RLKAXY])?$/);
+  if (match) {
+    return {
+      base: match[1],
+      explicitSuffix: match[2] || '',
+    };
+  }
+  return {
+    base: norm,
+    explicitSuffix: '',
+  };
+}
+

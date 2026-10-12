@@ -7,7 +7,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import PlotlyChart from '../PlotlyChart';
 import { buildTrafficData } from '../../utils/chartBuilder';
-import { cleanDistrictString, normalizeHighway } from '../../utils/normalizers';
+import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from '../../utils/normalizers';
 
 // ─── Format helper ────────────────────────────────────────────────────────────
 function formatRef(val) {
@@ -219,13 +219,16 @@ export default function TrafficTab({ section, pmisMap, pmisLoading, pmisProgress
   // Same roadbed discovery logic as ConditionTab
   const roadbeds = useMemo(() => {
     if (!pmisMap || !section) return [];
-    const baseKey = `${cleanDistrictString(section.district)}|${normalizeHighway(section.highway)}`;
+    const { base } = parseHighwayComponents(section.highway);
+    const baseKey = `${cleanDistrictString(section.district)}|${base}`;
     const beds = [];
-    if (pmisMap.has(baseKey))        beds.push('');
-    if (pmisMap.has(baseKey + 'R'))  beds.push('R');
-    if (pmisMap.has(baseKey + 'L'))  beds.push('L');
-    if (pmisMap.has(baseKey + 'K'))  beds.push('K');
-    if (pmisMap.has(baseKey + 'A'))  beds.push('A');
+    if (pmisMap.has(baseKey))          beds.push('');
+    if (pmisMap.has(baseKey + 'R'))    beds.push('R');
+    if (pmisMap.has(baseKey + 'L'))    beds.push('L');
+    if (pmisMap.has(baseKey + 'K(R)')) beds.push('K(R)');
+    if (pmisMap.has(baseKey + 'K(L)')) beds.push('K(L)');
+    if (pmisMap.has(baseKey + 'K'))    beds.push('K');
+    if (pmisMap.has(baseKey + 'A'))    beds.push('A');
     return beds;
   }, [pmisMap, section]);
 
