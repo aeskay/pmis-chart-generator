@@ -70,17 +70,20 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
     ? `${formatRef(data.pmisStartRef)} – ${formatRef(data.pmisEndRef)}`
     : 'None';
 
-  // Axis ranges
-  const aadtMax  = niceAadtMax(data.aadt);
-  const aadtStep = aadtMax / 5;
-
-  const truckVals = data.truckPct.filter(v => v !== null);
-  const truckMax  = truckVals.length ? Math.max(...truckVals) : 20;
-  const truckCeil = Math.ceil((truckMax * 1.2) / 5) * 5 || 20;
-
   const minYr = data.years[0] ?? 1996;
   const maxYr = data.years[data.years.length - 1] ?? 2024;
 
+  // Compute truck AADT as absolute count: AADT × (truckPct / 100)
+  const truckAadt = data.years.map((_, i) => {
+    const a = data.aadt[i];
+    const t = data.truckPct[i];
+    return (a !== null && t !== null) ? a * (t / 100) : null;
+  });
+
+  // Single axis max covers both series
+  const allVals = [...(data.aadt || []), ...truckAadt].filter(v => v !== null);
+  const combinedMax = niceAadtMax(allVals);
+  const combinedStep = combinedMax / 5;
   const traces = [
     {
       type: 'bar',
@@ -89,18 +92,16 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
       y: data.aadt,
       marker: { color: '#2563eb', line: { color: '#000000', width: 1 } },
       yaxis: 'y',
-      hovertemplate: 'Year: %{x}<br>AADT: %{y:,.0f}<extra></extra>',
+      hovertemplate: 'Year: %{x}<br>Total AADT: %{y:,.0f}<extra></extra>',
     },
     {
-      type: 'scatter',
-      name: 'Truck AADT %',
+      type: 'bar',
+      name: 'Avg. Truck AADT',
       x: data.years,
-      y: data.truckPct,
-      mode: 'lines+markers',
-      yaxis: 'y2',
-      line: { color: '#dc2626', width: 2.5 },
-      marker: { symbol: 'circle', size: 8, color: '#dc2626' },
-      hovertemplate: 'Year: %{x}<br>Truck %%: %{y:.1f}<extra></extra>',
+      y: truckAadt,
+      marker: { color: '#dc2626', line: { color: '#000000', width: 1 } },
+      yaxis: 'y',
+      hovertemplate: 'Year: %{x}<br>Truck AADT: %{y:,.0f}<extra></extra>',
     },
   ];
 
@@ -108,7 +109,7 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
     template: 'plotly_white',
     paper_bgcolor: '#ffffff',
     plot_bgcolor: '#ffffff',
-    margin: { t: 45, b: 100, l: 85, r: 85 },
+    margin: { t: 45, b: 100, l: 85, r: 60 },
     height: 420,
     barmode: 'group',
     hovermode: 'x unified',
@@ -124,25 +125,16 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
       showline: true, linewidth: 2, linecolor: '#000', mirror: true, ticks: 'inside',
     },
     yaxis: {
-      title: { text: '<b>Avg. AADT</b>', font: { size: 13 } },
-      range: [0, aadtMax],
-      dtick: aadtStep,
+      title: { text: '<b>Traffic Count (Vehicles)</b>', font: { size: 13 } },
+      range: [0, combinedMax],
+      dtick: combinedStep,
       tickformat: ',.0f',
       tickfont: { size: 12 },
-      showline: true, linewidth: 2, linecolor: '#000', mirror: false, ticks: 'inside',
+      showline: true, linewidth: 2, linecolor: '#000', mirror: true, ticks: 'inside',
       gridcolor: '#dddddd',
     },
-    yaxis2: {
-      title: { text: '<b>Truck AADT %</b>', font: { size: 13, color: '#dc2626' } },
-      tickfont: { size: 12, color: '#dc2626' },
-      tickformat: '.1f',
-      range: [0, truckCeil],
-      dtick: truckCeil / 5,
-      overlaying: 'y', side: 'right',
-      showgrid: false,
-      showline: true, linewidth: 2, linecolor: '#dc2626', ticks: 'inside',
-    },
   };
+
 
   const handleCopy = async () => {
     if (!chartRef.current || copying) return;
@@ -177,7 +169,7 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
           <div>
-            <div className="chart-panel__title">AADT &amp; Truck Percentage{titleSuffix}</div>
+            <div className="chart-panel__title">AADT &amp; Truck Traffic Count{titleSuffix}</div>
             <div className="chart-panel__sub" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
               <span>
                 <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>RM (Actual):</span>{' '}
