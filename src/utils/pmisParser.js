@@ -46,8 +46,8 @@ export function parsePmisCSV(csvText, { onProgress } = {}) {
           const find = (keywords) => keys.find(k => keywords.some(kw => k.toUpperCase().includes(kw))) || keywords[0];
           
           const findHighwayCol = () => {
-            const uKeys = keys.map(k => ({ raw: k, up: k.toUpperCase().trim() }));
-            const m1 = uKeys.find(k => (k.up.includes('SIGNED HWY') || k.up.includes('SIGNED HIGHWAY')) && !k.up.endsWith('ROADBED ID'));
+            const uKeys = keys.map(k => ({ raw: k, up: k.toUpperCase().replace(/[\s_-]+/g, ' ').trim() }));
+            const m1 = uKeys.find(k => k.up.includes('SIGNED HWY') || k.up.includes('SIGNED HIGHWAY'));
             if (m1) return m1.raw;
             const m2 = uKeys.find(k => (k.up.includes('HIGHWAY') || k.up.includes('HWY')) && !k.up.includes('ROADBED ID'));
             if (m2) return m2.raw;
@@ -55,8 +55,9 @@ export function parsePmisCSV(csvText, { onProgress } = {}) {
           };
 
           const findRoadbedIdCol = () => {
-            const uKeys = keys.map(k => ({ raw: k, up: k.toUpperCase().trim() }));
-            const m = uKeys.find(k => k.up === 'HIGHWAY ROADBED ID' || k.up.endsWith('ROADBED ID') || k.up.includes('HIGHWAY ROADBED ID'));
+            const uKeys = keys.map(k => ({ raw: k, up: k.toUpperCase().replace(/[\s_-]+/g, ' ').trim() }));
+            // Must NOT match 'SIGNED HWY AND ROADBED ID' (which is the highway name)
+            const m = uKeys.find(k => !k.up.includes('SIGNED') && (k.up === 'HIGHWAY ROADBED ID' || k.up === 'ROADBED ID' || k.up.includes('HIGHWAY ROADBED ID') || k.up.includes('HWY ROADBED ID')));
             return m ? m.raw : null;
           };
 

@@ -191,6 +191,14 @@ export default function App() {
     // 1. Restore PMIS database from IndexedDB
     get('cachedPmisData').then(data => {
       if (data && data.pmisMap) {
+        if (!data.version || data.version < 2) {
+          addToast(
+            'info',
+            'PMIS Update Available',
+            'To display K(R) and K(L) separated roadbeds, click "Change Database…" in the sidebar and re-select your PMIS file.',
+            12000
+          );
+        }
         setPmisMap(data.pmisMap);
         setPmisFileName(data.pmisFileName || 'PMIS Database');
       } else {
@@ -314,6 +322,7 @@ export default function App() {
         pmisMap: map,
         pmisFileName: file.name,
         cachedAt: new Date().toISOString(),
+        version: 2,
       });
     } catch (err) {
       console.error('PMIS Loading Error:', err);
