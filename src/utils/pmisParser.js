@@ -61,6 +61,8 @@ export function parsePmisCSV(csvText, { onProgress } = {}) {
             acpPatches: find(['ACP PATCHES', 'ACP PATCH']),
             pccPatches: find(['PCC PATCHES', 'PCC PATCH']),
             spalled: find(['SPALLED CRACKS', 'SPALLED']),
+            aadt:     find(['AADT CURRENT', 'AADT']),
+            truckPct: find(['TRUCK AADT PCT', 'TRUCK PCT', 'TRUCK PERCENT']),
           };
         }
 
@@ -103,6 +105,8 @@ export function parsePmisCSV(csvText, { onProgress } = {}) {
           punchout:       parseFloat(row[colMap.punchouts])  || 0,
           spalledCracks:  parseFloat(row[colMap.spalled])    || 0,
           calcLength:     parseFloat(row['CALCULATED LENGTH'] || row['LENGTH']) || 0,
+          aadt:           parseFloat(row[colMap.aadt])     || null,
+          truckPct:       parseFloat(row[colMap.truckPct]) || null,
         });
       },
 

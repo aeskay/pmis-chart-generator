@@ -201,7 +201,61 @@ export function buildDistressData(pmisMap, section, suffix = '') {
   };
 }
 
+// ─── Chart: Traffic (AADT + Truck Pct) ───────────────────────────────────────
+
+/**
+ * Build weighted-average AADT and Truck Percentage data for a single section.
+ * Uses the same overlap-length-weighted approach as buildEvalData.
+ *
+ * @param {Map<string, Object[]>} pmisMap
+ * @param {Object} section
+ * @param {string} suffix
+ * @returns {{ years, aadt, truckPct, pmisStartRef, pmisEndRef } | null}
+ */
+export function buildTrafficData(pmisMap, section, suffix = '') {
+  const records = getOverlapping(pmisMap, section, suffix);
+  if (!records.length) return null;
+
+  const start = parseFloat(section.beginRef);
+  const end   = parseFloat(section.endRef);
+  const byYear = {};
+
+  let pmisMinRef = Infinity;
+  let pmisMaxRef = -Infinity;
+
+  for (const p of records) {
+    if (!byYear[p.year]) {
+      byYear[p.year] = { wAadt: 0, lenAadt: 0, wTruck: 0, lenTruck: 0 };
+    }
+    const y = byYear[p.year];
+
+    const overlapStart = Math.max(start, p.startRef);
+    const overlapEnd   = Math.min(end,   p.endRef);
+    const w = Math.max(0, overlapEnd - overlapStart);
+
+    if (w > 0) {
+      if (p.aadt     !== null) { y.wAadt  += p.aadt     * w; y.lenAadt  += w; }
+      if (p.truckPct !== null) { y.wTruck += p.truckPct * w; y.lenTruck += w; }
+
+      if (typeof p.startRef === 'number' && p.startRef < pmisMinRef) pmisMinRef = p.startRef;
+      if (typeof p.endRef   === 'number' && p.endRef   > pmisMaxRef) pmisMaxRef = p.endRef;
+    }
+  }
+
+  const years = Object.keys(byYear).map(Number).sort((a, b) => a - b);
+  if (!years.length) return null;
+
+  return {
+    years,
+    aadt:     years.map(y => byYear[y].lenAadt  > 0 ? byYear[y].wAadt  / byYear[y].lenAadt  : null),
+    truckPct: years.map(y => byYear[y].lenTruck > 0 ? byYear[y].wTruck / byYear[y].lenTruck : null),
+    pmisStartRef: isFinite(pmisMinRef) ? pmisMinRef : null,
+    pmisEndRef:   isFinite(pmisMaxRef) ? pmisMaxRef : null,
+  };
+}
+
 // ─── Chart 3: Aggregate Distress across all sections ─────────────────────────
+
 
 /**
  * Build aggregate distress data across sections in a project.

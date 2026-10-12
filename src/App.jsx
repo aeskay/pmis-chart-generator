@@ -17,6 +17,7 @@ import ChartsTab from './components/tabs/ChartsTab';
 import DataTab from './components/tabs/DataTab';
 import MapTab from './components/tabs/MapTab';
 import HeatmapTab from './components/tabs/HeatmapTab';
+import TrafficTab from './components/tabs/TrafficTab';
 import ToastContainer from './components/ToastContainer';
 import NewProjectModal from './components/modals/NewProjectModal';
 import OpenProjectsModal from './components/modals/OpenProjectsModal';
@@ -53,6 +54,7 @@ const TABS = [
   { id: 'charts',       label: 'Charts',       icon: '📊' },
   { id: 'data',         label: 'Data',         icon: '📋' },
   { id: 'heatmap',      label: 'Heatmap',      icon: '🔥' },
+  { id: 'traffic',      label: 'Traffic',      icon: '🚦' },
   { id: 'map',          label: 'Map',          icon: '🗺️' },
 ];
 
@@ -853,6 +855,14 @@ export default function App() {
                 section={selectedSection}
                 pmisMap={pmisMap}
                 pmisLoading={pmisLoading}
+              />
+            )}
+            {activeTab === 'traffic' && (
+              <TrafficTab
+                section={selectedSection}
+                pmisMap={pmisMap}
+                pmisLoading={pmisLoading}
+                pmisProgress={pmisProgress}
               />
             )}
             {activeTab === 'map' && (
