@@ -4,11 +4,42 @@
  * by year for the selected section's reference marker range.
  * Mirrors the ConditionTab pattern: roadbed suffix loop → getOverlapping → weighted avg.
  */
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import PlotlyChart from '../PlotlyChart';
 import { buildTrafficData } from '../../utils/chartBuilder';
 import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from '../../utils/normalizers';
 import { exportSectionTrafficToExcel, exportProjectTrafficToExcel } from '../../utils/excelExporter';
+
+// ─── Section-keyed Persistence Helpers ─────────────────────────────────────────
+function getSectionKey(sec) {
+  if (!sec) return '';
+  return sec._uuid || `${sec.id}_${sec.highway || ''}_${sec.district || ''}`;
+}
+
+function loadAllTrafficYAxisConfigs() {
+  try {
+    const raw = localStorage.getItem('pmis_traffic_yaxis_by_section');
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn('Could not read pmis_traffic_yaxis_by_section', e);
+  }
+  return {};
+}
+
+function saveTrafficYAxisConfig(sectionKey, config) {
+  if (!sectionKey) return;
+  try {
+    const all = loadAllTrafficYAxisConfigs();
+    if (!config || !config.custom) {
+      delete all[sectionKey];
+    } else {
+      all[sectionKey] = config;
+    }
+    localStorage.setItem('pmis_traffic_yaxis_by_section', JSON.stringify(all));
+  } catch (e) {
+    console.warn('Could not save traffic y-axis config to localStorage', e);
+  }
+}
 
 // ─── Format helper ────────────────────────────────────────────────────────────
 function formatRef(val) {
@@ -56,10 +87,19 @@ function InfoCard({ label, value, accent }) {
 }
 
 // ─── Per-roadbed chart panel ───────────────────────────────────────────────────
-function RoadbedTrafficChart({ section, pmisMap, suffix, addToast }) {
+function RoadbedTrafficChart({
+  section,
+  pmisMap,
+  suffix,
+  addToast,
+  yAxisConfig,
+  onUpdateYAxisConfig,
+  onResetYAxis,
+}) {
   const chartRef = useRef(null);
   const [copied, setCopied]   = useState(false);
   const [copying, setCopying] = useState(false);
+  const [showAxisSettings, setShowAxisSettings] = useState(false);
 
   const data = useMemo(() => buildTrafficData(pmisMap, section, suffix), [pmisMap, section, suffix]);
 
@@ -81,10 +121,34 @@ function RoadbedTrafficChart({ section, pmisMap, suffix, addToast }) {
     return (a !== null && t !== null) ? a * (t / 100) : null;
   });
 
-  // Single axis max covers both series
+  // Calculate default auto nice ceiling
   const allVals = [...(data.aadt || []), ...truckAadt].filter(v => v !== null);
-  const combinedMax = niceAadtMax(allVals);
-  const combinedStep = combinedMax / 5;
+  const autoMax = niceAadtMax(allVals);
+  const autoStep = autoMax / 5;
+
+  let effectiveYMin = 0;
+  let effectiveYMax = autoMax;
+  let effectiveYStep = autoStep;
+
+  if (yAxisConfig?.custom) {
+    const pMin = parseFloat(yAxisConfig.min);
+    const pMax = parseFloat(yAxisConfig.max);
+    const pStep = parseFloat(yAxisConfig.dtick);
+
+    if (!isNaN(pMin)) effectiveYMin = pMin;
+    if (!isNaN(pMax) && pMax > effectiveYMin) {
+      effectiveYMax = pMax;
+    } else if (!isNaN(pMin) && pMin >= effectiveYMax) {
+      effectiveYMax = effectiveYMin + 5000;
+    }
+
+    if (!isNaN(pStep) && pStep > 0) {
+      effectiveYStep = pStep;
+    } else {
+      effectiveYStep = Math.max(1, (effectiveYMax - effectiveYMin) / 5);
+    }
+  }
+
   const traces = [
     {
       type: 'bar',
@@ -134,8 +198,9 @@ function RoadbedTrafficChart({ section, pmisMap, suffix, addToast }) {
     },
     yaxis: {
       title: { text: '<b>Traffic Count (Vehicles)</b>', font: { size: 13 } },
-      range: [0, combinedMax],
-      dtick: combinedStep,
+      range: [effectiveYMin, effectiveYMax],
+      tickmode: 'linear',
+      dtick: effectiveYStep,
       tickformat: ',.0f',
       tickfont: { size: 12 },
       showline: true, linewidth: 2, linecolor: '#000', mirror: true, ticks: 'inside',
@@ -203,11 +268,23 @@ function RoadbedTrafficChart({ section, pmisMap, suffix, addToast }) {
                 <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>RM (PMIS):</span>{' '}
                 <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)' }}>{pmisRangeStr}</span>
               </span>
+              <span style={{ color: 'var(--border-strong)' }}>·</span>
+              <span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Y-Axis:</span>{' '}
+                <span style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontWeight: 600,
+                  color: yAxisConfig?.custom ? 'var(--accent-secondary)' : 'var(--text-secondary)',
+                }}>
+                  {effectiveYMin.toLocaleString()} – {effectiveYMax.toLocaleString()} (step {effectiveYStep.toLocaleString()})
+                  {yAxisConfig?.custom ? ' [Custom]' : ' [Auto]'}
+                </span>
+              </span>
             </div>
           </div>
 
           {/* Actions */}
-          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               className="btn btn--sm btn--secondary"
               onClick={handleCopy}
@@ -232,8 +309,120 @@ function RoadbedTrafficChart({ section, pmisMap, suffix, addToast }) {
             >
               <span>📥</span> <span>Export Excel</span>
             </button>
+            <button
+              className="btn btn--sm btn--secondary"
+              onClick={() => setShowAxisSettings(prev => !prev)}
+              title="Set Y-Axis min, max, and interval for all roadbeds of this section"
+              style={{
+                gap: 5,
+                borderColor: yAxisConfig?.custom ? 'var(--accent-primary)' : undefined,
+                color: yAxisConfig?.custom ? 'var(--accent-secondary)' : undefined,
+                fontWeight: yAxisConfig?.custom ? 600 : undefined,
+              }}
+            >
+              <span>📐</span> <span>{showAxisSettings ? 'Close Axis' : 'Y-Axis'}</span>
+            </button>
           </div>
         </div>
+
+        {/* Inline Y-Axis Limits Panel (toggled from chart header) */}
+        {showAxisSettings && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            flexWrap: 'wrap',
+            background: 'var(--bg-elevated)',
+            border: yAxisConfig?.custom ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
+            borderRadius: 'var(--radius-md)',
+            padding: '8px 12px',
+            marginBottom: 12,
+            transition: 'border-color 0.2s',
+          }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: yAxisConfig?.custom ? 'var(--accent-secondary)' : 'var(--text-secondary)' }}>
+              📐 Y-Axis Limits (Section-wide):
+            </span>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              Min:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig?.min ?? 0}
+                placeholder="0"
+                onChange={(e) => onUpdateYAxisConfig && onUpdateYAxisConfig({ min: e.target.value })}
+                style={{
+                  width: '65px',
+                  background: 'var(--bg-panel)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '3px 6px',
+                  fontSize: '11px',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              Max:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig?.max ?? ''}
+                placeholder={String(autoMax)}
+                onChange={(e) => onUpdateYAxisConfig && onUpdateYAxisConfig({ max: e.target.value })}
+                style={{
+                  width: '75px',
+                  background: 'var(--bg-panel)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '3px 6px',
+                  fontSize: '11px',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              Interval:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig?.dtick ?? ''}
+                placeholder={String(autoStep)}
+                onChange={(e) => onUpdateYAxisConfig && onUpdateYAxisConfig({ dtick: e.target.value })}
+                style={{
+                  width: '65px',
+                  background: 'var(--bg-panel)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '3px 6px',
+                  fontSize: '11px',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            {yAxisConfig?.custom && (
+              <button
+                type="button"
+                onClick={onResetYAxis}
+                className="btn btn--sm"
+                title="Reset to Auto scaling"
+                style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  background: 'transparent',
+                  color: 'var(--accent-secondary)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                Reset to Auto
+              </button>
+            )}
+          </div>
+        )}
 
         <PlotlyChart ref={chartRef} data={traces} layout={layout} />
       </div>
@@ -251,6 +440,56 @@ export default function TrafficTab({
   pmisProgress,
   addToast,
 }) {
+  const secKey = useMemo(() => getSectionKey(section), [section]);
+
+  // Load section-specific yAxisConfig from localStorage or section object
+  const [yAxisConfig, setYAxisConfig] = useState(() => {
+    if (!section) return { custom: false, min: 0, max: '', dtick: '' };
+    const all = loadAllTrafficYAxisConfigs();
+    const saved = all[getSectionKey(section)] || section.trafficYAxis;
+    if (saved) {
+      return {
+        custom: Boolean(saved.custom),
+        min: saved.min ?? 0,
+        max: saved.max ?? '',
+        dtick: saved.dtick ?? '',
+      };
+    }
+    return { custom: false, min: 0, max: '', dtick: '' };
+  });
+
+  // Whenever the active section changes, load that section's persisted y-axis config
+  useEffect(() => {
+    if (!section) return;
+    const key = getSectionKey(section);
+    const all = loadAllTrafficYAxisConfigs();
+    const saved = all[key] || section.trafficYAxis;
+    if (saved && saved.custom) {
+      setYAxisConfig({
+        custom: true,
+        min: saved.min ?? 0,
+        max: saved.max ?? '',
+        dtick: saved.dtick ?? '',
+      });
+    } else {
+      setYAxisConfig({ custom: false, min: 0, max: '', dtick: '' });
+    }
+  }, [secKey]);
+
+  const updateYAxisConfig = (updates) => {
+    setYAxisConfig(prev => {
+      const next = { ...prev, ...updates, custom: true };
+      saveTrafficYAxisConfig(secKey, next);
+      return next;
+    });
+  };
+
+  const handleResetYAxis = () => {
+    const reset = { custom: false, min: 0, max: '', dtick: '' };
+    setYAxisConfig(reset);
+    saveTrafficYAxisConfig(secKey, reset);
+  };
+
   // Same roadbed discovery logic as ConditionTab
   const roadbeds = useMemo(() => {
     if (!pmisMap || !section) return [];
@@ -337,19 +576,130 @@ export default function TrafficTab({
 
   return (
     <div>
-      {/* Section info cards & Export actions */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, flex: '1 1 auto' }}>
-          <InfoCard label="ID"        value={section.id} />
-          <InfoCard label="Highway"   value={section.highway} accent="var(--accent-secondary)" />
-          <InfoCard label="District"  value={section.district} />
-          <InfoCard label="Begin Ref" value={typeof section.beginRef === 'number' ? section.beginRef.toFixed(3) : section.beginRef} />
-          <InfoCard label="End Ref"   value={typeof section.endRef   === 'number' ? section.endRef.toFixed(3)   : section.endRef} />
-          <InfoCard label="County"    value={section.countyName} />
-          <InfoCard label="CSJ"       value={section.csj} accent="var(--accent-secondary)" />
-        </div>
+      {/* Section info cards */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        <InfoCard label="ID"        value={section.id} />
+        <InfoCard label="Highway"   value={section.highway} accent="var(--accent-secondary)" />
+        <InfoCard label="District"  value={section.district} />
+        <InfoCard label="Begin Ref" value={typeof section.beginRef === 'number' ? section.beginRef.toFixed(3) : section.beginRef} />
+        <InfoCard label="End Ref"   value={typeof section.endRef   === 'number' ? section.endRef.toFixed(3)   : section.endRef} />
+        <InfoCard label="County"    value={section.countyName} />
+        <InfoCard label="CSJ"       value={section.csj} accent="var(--accent-secondary)" />
+      </div>
 
-        {roadbeds.length > 0 && (
+      {/* Section Controls Toolbar: Y-Axis & Exports */}
+      {roadbeds.length > 0 && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
+          background: 'var(--bg-panel)',
+          border: yAxisConfig.custom ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
+          borderRadius: 'var(--radius-md)',
+          padding: '10px 16px',
+          marginBottom: 20,
+          boxShadow: 'var(--shadow-sm)',
+          transition: 'border-color 0.2s',
+        }}>
+          {/* Y-Axis Section Limits */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{
+              fontSize: '12px',
+              fontWeight: 700,
+              color: yAxisConfig.custom ? 'var(--accent-secondary)' : 'var(--text-heading)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+            }}>
+              <span>📐</span> Y-Axis Limits (All Roadbeds):
+            </span>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              Min:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig.min}
+                placeholder="0"
+                onChange={(e) => updateYAxisConfig({ min: e.target.value })}
+                style={{
+                  width: '70px',
+                  background: 'var(--bg-elevated)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '3px 6px',
+                  fontSize: '12px',
+                  fontFamily: 'var(--font-mono)',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              Max:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig.max}
+                placeholder="Auto"
+                onChange={(e) => updateYAxisConfig({ max: e.target.value })}
+                style={{
+                  width: '80px',
+                  background: 'var(--bg-elevated)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '3px 6px',
+                  fontSize: '12px',
+                  fontFamily: 'var(--font-mono)',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              Interval:
+              <input
+                type="number"
+                step="any"
+                value={yAxisConfig.dtick}
+                placeholder="Auto"
+                onChange={(e) => updateYAxisConfig({ dtick: e.target.value })}
+                style={{
+                  width: '70px',
+                  background: 'var(--bg-elevated)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '3px 6px',
+                  fontSize: '12px',
+                  fontFamily: 'var(--font-mono)',
+                  textAlign: 'center',
+                }}
+              />
+            </label>
+            {yAxisConfig.custom && (
+              <button
+                type="button"
+                onClick={handleResetYAxis}
+                className="btn btn--sm"
+                title="Reset to Auto scaling"
+                style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  background: 'transparent',
+                  color: 'var(--accent-secondary)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                Reset to Auto
+              </button>
+            )}
+          </div>
+
+          {/* Export Actions */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
             <button
               className="btn btn--secondary btn--sm"
@@ -370,8 +720,8 @@ export default function TrafficTab({
               </button>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {roadbeds.length > 0 ? (
         roadbeds.map(suffix => (
@@ -381,6 +731,9 @@ export default function TrafficTab({
             pmisMap={pmisMap}
             suffix={suffix}
             addToast={addToast}
+            yAxisConfig={yAxisConfig}
+            onUpdateYAxisConfig={updateYAxisConfig}
+            onResetYAxis={handleResetYAxis}
           />
         ))
       ) : (

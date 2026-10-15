@@ -875,6 +875,7 @@ export default function App() {
                 pmisLoading={pmisLoading}
                 pmisProgress={pmisProgress}
                 addToast={addToast}
+                onUpdateSection={handleUpdateSection}
               />
             )}
             {activeTab === 'map' && (
