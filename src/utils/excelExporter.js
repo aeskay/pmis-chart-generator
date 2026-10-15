@@ -4,7 +4,7 @@
  */
 
 import * as XLSX from 'xlsx';
-import { buildEvalData, buildDistressData } from './chartBuilder';
+import { buildEvalData, buildDistressData, buildTrafficData } from './chartBuilder';
 import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from './normalizers';
 
 /**
@@ -108,6 +108,9 @@ export function buildSectionSheetAoa(section, pmisMap) {
     'ACP Patches (/mi)',
     'PCC Patches (/mi)',
     'Spalled Cracks (/mi)',
+    'Total AADT',
+    'Truck Percentage (%)',
+    'Truck AADT',
   ];
 
   const dataRows = [];
@@ -116,16 +119,22 @@ export function buildSectionSheetAoa(section, pmisMap) {
     const roadbedLabel = suffix ? suffix : (roadbeds.length > 1 ? 'Main' : 'Main');
     const evalData = pmisMap ? buildEvalData(pmisMap, section, suffix) : null;
     const distData = pmisMap ? buildDistressData(pmisMap, section, suffix) : null;
+    const trafficData = pmisMap ? buildTrafficData(pmisMap, section, suffix) : null;
 
-    if (!evalData && !distData) continue;
+    if (!evalData && !distData && !trafficData) continue;
 
     const allYears = Array.from(
-      new Set([...(evalData?.years || []), ...(distData?.years || [])])
+      new Set([
+        ...(evalData?.years || []),
+        ...(distData?.years || []),
+        ...(trafficData?.years || []),
+      ])
     ).sort((a, b) => a - b);
 
     for (const yr of allYears) {
       const evalIdx = evalData ? evalData.years.indexOf(yr) : -1;
       const distIdx = distData ? distData.years.indexOf(yr) : -1;
+      const trafficIdx = trafficData ? trafficData.years.indexOf(yr) : -1;
 
       const condScore = evalIdx >= 0 ? roundVal(evalData.conditionScore[evalIdx], 1) : '';
       const distScore = evalIdx >= 0 ? roundVal(evalData.distressScore[evalIdx], 1) : '';
@@ -135,6 +144,12 @@ export function buildSectionSheetAoa(section, pmisMap) {
       const acpPatches = distIdx >= 0 ? roundVal(distData.acpPerMile[distIdx], 2) : '';
       const pccPatches = distIdx >= 0 ? roundVal(distData.pccPerMile[distIdx], 2) : '';
       const spalledCracks = distIdx >= 0 ? roundVal(distData.spallPerMile[distIdx], 2) : '';
+
+      const aadtVal = trafficIdx >= 0 && trafficData.aadt[trafficIdx] !== null ? Math.round(trafficData.aadt[trafficIdx]) : '';
+      const truckPctVal = trafficIdx >= 0 && trafficData.truckPct[trafficIdx] !== null ? roundVal(trafficData.truckPct[trafficIdx], 1) : '';
+      const truckAadtVal = (trafficIdx >= 0 && trafficData.aadt[trafficIdx] !== null && trafficData.truckPct[trafficIdx] !== null)
+        ? Math.round(trafficData.aadt[trafficIdx] * (trafficData.truckPct[trafficIdx] / 100))
+        : '';
 
       dataRows.push([
         yr,
@@ -146,12 +161,15 @@ export function buildSectionSheetAoa(section, pmisMap) {
         acpPatches,
         pccPatches,
         spalledCracks,
+        aadtVal,
+        truckPctVal,
+        truckAadtVal,
       ]);
     }
   }
 
   if (dataRows.length === 0) {
-    dataRows.push(['No PMIS data matched for this reference marker range', '', '', '', '', '', '', '', '']);
+    dataRows.push(['No PMIS data matched for this reference marker range', '', '', '', '', '', '', '', '', '', '', '']);
   }
 
   return [row1, row2, ...dataRows];
@@ -175,9 +193,257 @@ export function createSectionWorksheet(section, pmisMap) {
     { wch: 16 }, // ACP Patches
     { wch: 16 }, // PCC Patches
     { wch: 20 }, // Spalled Cracks
+    { wch: 16 }, // Total AADT
+    { wch: 22 }, // Truck Percentage (%)
+    { wch: 16 }, // Truck AADT
   ];
 
   return ws;
+}
+
+/**
+ * Builds rows (array of arrays) for a dedicated section traffic worksheet.
+ *
+ * Row 1: Section metadata (ID, Highway, District, County, RM range, Yr Const, EOL, Rehab, S/N, GPS)
+ * Row 2: Table headers (Year, Roadbed, Total AADT, Truck Percentage (%), Truck AADT)
+ * Row 3+: Yearly rows
+ */
+export function buildSectionTrafficSheetAoa(section, pmisMap, roadbedsToExport = null) {
+  const roadbeds = roadbedsToExport && roadbedsToExport.length > 0
+    ? roadbedsToExport
+    : getSectionRoadbeds(pmisMap, section);
+  const actualRmStr = `${formatRef(section.beginRef)} – ${formatRef(section.endRef)}`;
+
+  // Row 1: Section metadata
+  const row1 = [
+    `ID: ${section.id ?? '—'}`,
+    `Highway: ${section.highway ?? '—'}`,
+    `District: ${section.district ?? '—'}`,
+    `County: ${section.countyName ?? '—'}`,
+    `RM (Actual): ${actualRmStr}`,
+    `Yr Const: ${section.yearConstructed ?? '—'}`,
+    `End of Life: ${section.endOfLife ?? '—'}`,
+    `CSJ: ${section.csj ?? '—'}`,
+    `Rehab: ${section.rehabMethod ?? '—'}`,
+    `S/N: ${section.sn ?? '—'}`,
+  ];
+
+  const rStart = section.coordinates?.R?.begin ? `${section.coordinates.R.begin[0].toFixed(5)}, ${section.coordinates.R.begin[1].toFixed(5)}` : null;
+  const lStart = section.coordinates?.L?.begin ? `${section.coordinates.L.begin[0].toFixed(5)}, ${section.coordinates.L.begin[1].toFixed(5)}` : null;
+  if (rStart || lStart) {
+    row1.push(`GPS (R): ${rStart ?? '—'}`);
+    row1.push(`GPS (L): ${lStart ?? '—'}`);
+  }
+
+  // Row 2: Table headers
+  const row2 = [
+    'Year',
+    'Roadbed',
+    'Total AADT',
+    'Truck Percentage (%)',
+    'Truck AADT',
+  ];
+
+  const dataRows = [];
+
+  for (const suffix of roadbeds) {
+    const roadbedLabel = suffix ? suffix : (roadbeds.length > 1 ? 'Main' : 'Main');
+    const data = pmisMap ? buildTrafficData(pmisMap, section, suffix) : null;
+    if (!data || !data.years || data.years.length === 0) continue;
+
+    for (let i = 0; i < data.years.length; i++) {
+      const yr = data.years[i];
+      const aadt = data.aadt[i];
+      const truckPct = data.truckPct[i];
+
+      const aadtVal = (aadt !== null && !isNaN(aadt)) ? Math.round(aadt) : '';
+      const truckPctVal = (truckPct !== null && !isNaN(truckPct)) ? roundVal(truckPct, 1) : '';
+      const truckAadtVal = (aadt !== null && truckPct !== null && !isNaN(aadt) && !isNaN(truckPct))
+        ? Math.round(aadt * (truckPct / 100))
+        : '';
+
+      dataRows.push([
+        yr,
+        roadbedLabel,
+        aadtVal,
+        truckPctVal,
+        truckAadtVal,
+      ]);
+    }
+  }
+
+  if (dataRows.length === 0) {
+    dataRows.push(['No PMIS traffic data matched for this reference marker range', '', '', '', '']);
+  }
+
+  return [row1, row2, ...dataRows];
+}
+
+/**
+ * Creates a configured XLSX worksheet for traffic data.
+ */
+export function createSectionTrafficWorksheet(section, pmisMap, roadbedsToExport = null) {
+  const aoa = buildSectionTrafficSheetAoa(section, pmisMap, roadbedsToExport);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  ws['!cols'] = [
+    { wch: 14 }, // Year
+    { wch: 14 }, // Roadbed
+    { wch: 18 }, // Total AADT
+    { wch: 22 }, // Truck Percentage (%)
+    { wch: 18 }, // Truck AADT
+  ];
+
+  return ws;
+}
+
+/**
+ * Export section traffic data to an Excel (.xlsx) file.
+ *
+ * @param {Object} section
+ * @param {Map<string, Object[]>} pmisMap
+ * @param {string|null} [specificSuffix] - Specific roadbed suffix (e.g. 'R', 'L') or null for all
+ */
+export function exportSectionTrafficToExcel(section, pmisMap, specificSuffix = null) {
+  if (!section) return;
+  const wb = XLSX.utils.book_new();
+  const roadbeds = getSectionRoadbeds(pmisMap, section);
+  const existingSheetNames = new Set();
+
+  if (specificSuffix !== null && specificSuffix !== undefined) {
+    // 1. Primary sheet: selected roadbed
+    const wsSpecific = createSectionTrafficWorksheet(section, pmisMap, [specificSuffix]);
+    const rawSheetName = `Roadbed_${specificSuffix || 'Main'}`;
+    const sheetName = makeSafeSheetName(rawSheetName, existingSheetNames);
+    XLSX.utils.book_append_sheet(wb, wsSpecific, sheetName);
+
+    // If other roadbeds exist, add them too so all data is accessible
+    for (const bed of roadbeds) {
+      if (bed !== specificSuffix) {
+        const wsOther = createSectionTrafficWorksheet(section, pmisMap, [bed]);
+        const otherName = makeSafeSheetName(`Roadbed_${bed || 'Main'}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, wsOther, otherName);
+      }
+    }
+
+    if (roadbeds.length > 1) {
+      const wsAll = createSectionTrafficWorksheet(section, pmisMap, roadbeds);
+      const allName = makeSafeSheetName('All_Roadbeds', existingSheetNames);
+      XLSX.utils.book_append_sheet(wb, wsAll, allName);
+    }
+  } else {
+    // No specific suffix:
+    // If multiple roadbeds, first sheet is combined All Roadbeds
+    if (roadbeds.length > 1) {
+      const wsAll = createSectionTrafficWorksheet(section, pmisMap, roadbeds);
+      const allName = makeSafeSheetName('All_Roadbeds', existingSheetNames);
+      XLSX.utils.book_append_sheet(wb, wsAll, allName);
+    }
+
+    for (const bed of roadbeds) {
+      const wsBed = createSectionTrafficWorksheet(section, pmisMap, [bed]);
+      const bedName = makeSafeSheetName(roadbeds.length > 1 ? `Roadbed_${bed || 'Main'}` : 'Traffic_Data', existingSheetNames);
+      XLSX.utils.book_append_sheet(wb, wsBed, bedName);
+    }
+  }
+
+  const suffixStr = specificSuffix ? `_${specificSuffix}` : '';
+  const safeFileName = `${section.id || 'section'}_${section.highway || 'PMIS'}${suffixStr}_Traffic_Data.xlsx`
+    .replace(/[\\/:*?"<>|]/g, '_');
+
+  XLSX.writeFile(wb, safeFileName);
+}
+
+/**
+ * Export project traffic data for all sections to an Excel (.xlsx) file.
+ */
+export function exportProjectTrafficToExcel(project, sections, pmisMap) {
+  if (!Array.isArray(sections) || sections.length === 0) {
+    alert('Please select at least one section to export.');
+    return;
+  }
+
+  const wb = XLSX.utils.book_new();
+  const summaryHeaders = [
+    'Section ID',
+    'CSJ',
+    'Highway',
+    'District',
+    'County',
+    'RM (Actual)',
+    'Roadbed',
+    'Year',
+    'Total AADT',
+    'Truck Percentage (%)',
+    'Truck AADT',
+  ];
+
+  const summaryRows = [summaryHeaders];
+
+  for (const s of sections) {
+    const roadbeds = getSectionRoadbeds(pmisMap, s);
+    const actualRmStr = `${formatRef(s.beginRef)} – ${formatRef(s.endRef)}`;
+
+    for (const suffix of roadbeds) {
+      const roadbedLabel = suffix ? suffix : (roadbeds.length > 1 ? 'Main' : 'Main');
+      const data = pmisMap ? buildTrafficData(pmisMap, s, suffix) : null;
+      if (!data || !data.years || data.years.length === 0) continue;
+
+      for (let i = 0; i < data.years.length; i++) {
+        const yr = data.years[i];
+        const aadt = data.aadt[i];
+        const truckPct = data.truckPct[i];
+
+        const aadtVal = (aadt !== null && !isNaN(aadt)) ? Math.round(aadt) : '';
+        const truckPctVal = (truckPct !== null && !isNaN(truckPct)) ? roundVal(truckPct, 1) : '';
+        const truckAadtVal = (aadt !== null && truckPct !== null && !isNaN(aadt) && !isNaN(truckPct))
+          ? Math.round(aadt * (truckPct / 100))
+          : '';
+
+        summaryRows.push([
+          s.id ?? '',
+          s.csj ?? '',
+          s.highway ?? '',
+          s.district ?? '',
+          s.countyName ?? '',
+          actualRmStr,
+          roadbedLabel,
+          yr,
+          aadtVal,
+          truckPctVal,
+          truckAadtVal,
+        ]);
+      }
+    }
+  }
+
+  if (summaryRows.length === 1) {
+    summaryRows.push(['No PMIS traffic data matched for any section in this project', '', '', '', '', '', '', '', '', '', '']);
+  }
+
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  wsSummary['!cols'] = [
+    { wch: 14 }, // Section ID
+    { wch: 16 }, // CSJ
+    { wch: 12 }, // Highway
+    { wch: 14 }, // District
+    { wch: 16 }, // County
+    { wch: 18 }, // RM Actual
+    { wch: 12 }, // Roadbed
+    { wch: 12 }, // Year
+    { wch: 16 }, // Total AADT
+    { wch: 22 }, // Truck Percentage (%)
+    { wch: 16 }, // Truck AADT
+  ];
+
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'All Sections Traffic');
+
+  const safeProjectName = (project?.name || 'PMIS_Project')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .trim();
+  const fileName = `${safeProjectName || 'PMIS_Project'}_Traffic_Data.xlsx`;
+
+  XLSX.writeFile(wb, fileName);
 }
 
 /**

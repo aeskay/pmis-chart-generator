@@ -868,10 +868,13 @@ export default function App() {
             )}
             {activeTab === 'traffic' && (
               <TrafficTab
+                project={selectedProject}
+                sections={projectSections}
                 section={selectedSection}
                 pmisMap={pmisMap}
                 pmisLoading={pmisLoading}
                 pmisProgress={pmisProgress}
+                addToast={addToast}
               />
             )}
             {activeTab === 'map' && (

@@ -8,6 +8,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import PlotlyChart from '../PlotlyChart';
 import { buildTrafficData } from '../../utils/chartBuilder';
 import { cleanDistrictString, normalizeHighway, parseHighwayComponents } from '../../utils/normalizers';
+import { exportSectionTrafficToExcel, exportProjectTrafficToExcel } from '../../utils/excelExporter';
 
 // ─── Format helper ────────────────────────────────────────────────────────────
 function formatRef(val) {
@@ -55,7 +56,7 @@ function InfoCard({ label, value, accent }) {
 }
 
 // ─── Per-roadbed chart panel ───────────────────────────────────────────────────
-function RoadbedTrafficChart({ section, pmisMap, suffix }) {
+function RoadbedTrafficChart({ section, pmisMap, suffix, addToast }) {
   const chartRef = useRef(null);
   const [copied, setCopied]   = useState(false);
   const [copying, setCopying] = useState(false);
@@ -142,7 +143,6 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
     },
   };
 
-
   const handleCopy = async () => {
     if (!chartRef.current || copying) return;
     try {
@@ -164,6 +164,22 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
       filename: `Traffic_${section.highway}_${section.id}${suffix ? `_${suffix}` : ''}`,
       width: 1200, height: 500, scale: 2,
     });
+  };
+
+  const handleExportExcel = () => {
+    try {
+      exportSectionTrafficToExcel(section, pmisMap, suffix);
+      if (addToast) {
+        addToast(
+          'success',
+          'Traffic Data Exported',
+          `Saved traffic data for Section ${section.id}${suffix ? ` (Roadbed ${suffix})` : ''} to Excel.`
+        );
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Could not export traffic data: ' + (err.message || err));
+    }
   };
 
   return (
@@ -208,6 +224,14 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
             >
               ⬇️ <span>PNG</span>
             </button>
+            <button
+              className="btn btn--sm btn--secondary"
+              onClick={handleExportExcel}
+              title={`Export traffic data${suffix ? ` for Roadbed ${suffix}` : ''} to Excel (.xlsx)`}
+              style={{ gap: 5 }}
+            >
+              <span>📥</span> <span>Export Excel</span>
+            </button>
           </div>
         </div>
 
@@ -218,7 +242,15 @@ function RoadbedTrafficChart({ section, pmisMap, suffix }) {
 }
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
-export default function TrafficTab({ section, pmisMap, pmisLoading, pmisProgress }) {
+export default function TrafficTab({
+  project,
+  sections = [],
+  section,
+  pmisMap,
+  pmisLoading,
+  pmisProgress,
+  addToast,
+}) {
   // Same roadbed discovery logic as ConditionTab
   const roadbeds = useMemo(() => {
     if (!pmisMap || !section) return [];
@@ -234,6 +266,38 @@ export default function TrafficTab({ section, pmisMap, pmisLoading, pmisProgress
     if (pmisMap.has(baseKey + 'A'))    beds.push('A');
     return beds;
   }, [pmisMap, section]);
+
+  const handleExportSectionTraffic = () => {
+    try {
+      exportSectionTrafficToExcel(section, pmisMap);
+      if (addToast) {
+        addToast(
+          'success',
+          'Traffic Data Exported',
+          `Saved all traffic data for Section ${section.id} (${section.highway}) to Excel.`
+        );
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Could not export traffic data: ' + (err.message || err));
+    }
+  };
+
+  const handleExportProjectTraffic = () => {
+    try {
+      exportProjectTrafficToExcel(project, sections, pmisMap);
+      if (addToast) {
+        addToast(
+          'success',
+          'Project Traffic Exported',
+          `Saved traffic data for ${sections.length} section(s) to Excel.`
+        );
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Could not export project traffic data: ' + (err.message || err));
+    }
+  };
 
   if (!pmisMap && !pmisLoading) {
     return (
@@ -273,20 +337,51 @@ export default function TrafficTab({ section, pmisMap, pmisLoading, pmisProgress
 
   return (
     <div>
-      {/* Section info cards */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-        <InfoCard label="ID"        value={section.id} />
-        <InfoCard label="Highway"   value={section.highway} accent="var(--accent-secondary)" />
-        <InfoCard label="District"  value={section.district} />
-        <InfoCard label="Begin Ref" value={typeof section.beginRef === 'number' ? section.beginRef.toFixed(3) : section.beginRef} />
-        <InfoCard label="End Ref"   value={typeof section.endRef   === 'number' ? section.endRef.toFixed(3)   : section.endRef} />
-        <InfoCard label="County"    value={section.countyName} />
-        <InfoCard label="CSJ"       value={section.csj} accent="var(--accent-secondary)" />
+      {/* Section info cards & Export actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, flex: '1 1 auto' }}>
+          <InfoCard label="ID"        value={section.id} />
+          <InfoCard label="Highway"   value={section.highway} accent="var(--accent-secondary)" />
+          <InfoCard label="District"  value={section.district} />
+          <InfoCard label="Begin Ref" value={typeof section.beginRef === 'number' ? section.beginRef.toFixed(3) : section.beginRef} />
+          <InfoCard label="End Ref"   value={typeof section.endRef   === 'number' ? section.endRef.toFixed(3)   : section.endRef} />
+          <InfoCard label="County"    value={section.countyName} />
+          <InfoCard label="CSJ"       value={section.csj} accent="var(--accent-secondary)" />
+        </div>
+
+        {roadbeds.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
+            <button
+              className="btn btn--secondary btn--sm"
+              onClick={handleExportSectionTraffic}
+              title="Export all traffic data for this section to Excel (.xlsx)"
+              style={{ gap: 6, fontWeight: 600, fontSize: '12px' }}
+            >
+              <span>📥</span> <span>Export Section Traffic</span>
+            </button>
+            {sections && sections.length > 1 && (
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={handleExportProjectTraffic}
+                title={`Export traffic data for all ${sections.length} sections in this project to Excel (.xlsx)`}
+                style={{ gap: 6, fontWeight: 600, fontSize: '12px' }}
+              >
+                <span>📊</span> <span>Export All Sections</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {roadbeds.length > 0 ? (
         roadbeds.map(suffix => (
-          <RoadbedTrafficChart key={suffix} section={section} pmisMap={pmisMap} suffix={suffix} />
+          <RoadbedTrafficChart
+            key={suffix}
+            section={section}
+            pmisMap={pmisMap}
+            suffix={suffix}
+            addToast={addToast}
+          />
         ))
       ) : (
         <div className="empty-state" style={{ padding: '32px 0' }}>
