@@ -112,6 +112,12 @@ export default function OpenProjectsModal({
                 return (
                   <div
                     key={p.id}
+                    onClick={() => {
+                      if (renamingId !== p.id) {
+                        onSelectProject(p.id);
+                        onClose();
+                      }
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -120,12 +126,16 @@ export default function OpenProjectsModal({
                       background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-elevated)',
                       border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
                       borderRadius: 'var(--radius-lg)',
+                      cursor: 'pointer',
                       transition: 'background var(--t-fast), border-color var(--t-fast)',
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
                       {renamingId === p.id ? (
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <div
+                          style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+                          onClick={e => e.stopPropagation()}
+                        >
                           <input
                             type="text"
                             className="form-input"
@@ -186,7 +196,10 @@ export default function OpenProjectsModal({
                             className="btn btn--ghost btn--sm"
                             style={{ padding: '4px 8px' }}
                             title="Rename project"
-                            onClick={() => startRename(p)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startRename(p);
+                            }}
                           >
                             ✏️
                           </button>
@@ -194,7 +207,8 @@ export default function OpenProjectsModal({
                             className="btn btn--ghost btn--sm"
                             style={{ padding: '4px 8px', color: '#f87171' }}
                             title="Delete project"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               if (window.confirm(`Delete project "${p.name}"?`)) {
                                 onDeleteProject(p.id);
                               }
@@ -204,7 +218,8 @@ export default function OpenProjectsModal({
                           </button>
                           <button
                             className={`btn ${isSelected ? 'btn--ghost' : 'btn--primary'} btn--sm`}
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               onSelectProject(p.id);
                               onClose();
                             }}

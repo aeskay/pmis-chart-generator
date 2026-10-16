@@ -58,6 +58,28 @@ const TABS = [
   { id: 'map',          label: 'Map',          icon: '🗺️' },
 ];
 
+function getLastProjectId(userId) {
+  try {
+    const key = userId ? `pmis_last_project_${userId}` : 'pmis_last_project_local';
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function saveLastProjectId(userId, projectId) {
+  try {
+    const key = userId ? `pmis_last_project_${userId}` : 'pmis_last_project_local';
+    if (projectId) {
+      localStorage.setItem(key, projectId);
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch (err) {
+    console.warn('Failed to save last project ID:', err);
+  }
+}
+
 const SAVE_DEBOUNCE_MS = 800;
 
 let _toastId = 0;
@@ -147,8 +169,10 @@ export default function App() {
                   ...prev,
                   projects: hydratedProjects,
                 }));
+                const lastId = getLastProjectId(user.uid);
                 setSelectedProjectId(prevId => {
                   if (hydratedProjects.some(p => p.id === prevId)) return prevId;
+                  if (lastId && hydratedProjects.some(p => p.id === lastId)) return lastId;
                   return hydratedProjects[0]?.id || null;
                 });
               });
@@ -174,7 +198,9 @@ export default function App() {
         get('pmis-chart-studio:currentWorkingState').then(savedState => {
           if (savedState && Array.isArray(savedState.projects)) {
             setState(savedState);
-            setSelectedProjectId(savedState.projects[0]?.id || null);
+            const lastLocalId = getLastProjectId(null);
+            const targetProject = savedState.projects.find(p => p.id === lastLocalId) || savedState.projects[0];
+            setSelectedProjectId(targetProject?.id || null);
           }
         }).catch(console.warn);
       }
@@ -229,7 +255,9 @@ export default function App() {
         );
         const finalState = { ...savedState, projects: hydratedProjects };
         setState(finalState);
-        setSelectedProjectId(hydratedProjects[0].id);
+        const lastId = getLastProjectId(null);
+        const target = hydratedProjects.find(p => p.id === lastId) || hydratedProjects[0];
+        setSelectedProjectId(target?.id || null);
         if (hasAnyHydration) {
           set('pmis-chart-studio:currentWorkingState', finalState).catch(console.warn);
         }
@@ -418,6 +446,7 @@ export default function App() {
     }));
     setSelectedProjectId(id);
     setSelectedSectionId(null);
+    saveLastProjectId(currentUser?.uid, id);
     setShowNewProjectModal(false);
     addToast('success', 'Project created', name);
 
@@ -452,14 +481,16 @@ export default function App() {
   const handleDeleteProject = useCallback((id) => {
     const ok = window.confirm('Delete this project and all its sections?');
     if (!ok) return;
-    mutate(prev => ({
-      ...prev,
-      projects: prev.projects.filter(p => p.id !== id),
-    }));
-    if (selectedProjectId === id) {
-      setSelectedProjectId(null);
-      setSelectedSectionId(null);
-    }
+    mutate(prev => {
+      const nextProjects = prev.projects.filter(p => p.id !== id);
+      if (selectedProjectId === id) {
+        const nextId = nextProjects[0]?.id || null;
+        setSelectedProjectId(nextId);
+        setSelectedSectionId(null);
+        saveLastProjectId(currentUser?.uid, nextId);
+      }
+      return { ...prev, projects: nextProjects };
+    });
     if (currentUser) {
       setCloudSyncStatus('saving');
       deleteUserProject(currentUser.uid, id)
@@ -471,7 +502,8 @@ export default function App() {
   const handleSelectProject = useCallback((id) => {
     setSelectedProjectId(id);
     setSelectedSectionId(null);
-  }, []);
+    saveLastProjectId(currentUser?.uid, id);
+  }, [currentUser]);
 
   // ── Section actions ────────────────────────────────────────────────────────
   const handleAddSections = useCallback(async (newSections, importMode = 'merge') => {
@@ -774,11 +806,8 @@ export default function App() {
           pmisLoading={pmisLoading}
           pmisProgress={pmisProgress}
           onLoadPmis={loadPmisFromFile}
-          projects={state.projects}
-          selectedProjectId={selectedProjectId}
-          onSelectProject={handleSelectProject}
-          onRenameProject={handleRenameProject}
-          onDeleteProject={handleDeleteProject}
+          selectedProject={selectedProject}
+          onOpenProjectsModal={() => setShowOpenProjectsModal(true)}
           sections={projectSections}
           selectedSectionId={selectedSectionId}
           onSelectSection={handleSelectSection}
@@ -906,10 +935,7 @@ export default function App() {
         onClose={() => setShowOpenProjectsModal(false)}
         projects={state.projects}
         selectedProjectId={selectedProjectId}
-        onSelectProject={(id) => {
-          setSelectedProjectId(id);
-          setSelectedSectionId(null);
-        }}
+        onSelectProject={handleSelectProject}
         onRenameProject={handleRenameProject}
         onDeleteProject={handleDeleteProject}
         onNewProject={() => setShowNewProjectModal(true)}

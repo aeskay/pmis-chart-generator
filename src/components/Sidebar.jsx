@@ -1,10 +1,9 @@
 /**
  * Sidebar.jsx
- * Left sidebar: PMIS file section, Projects list, Sections list.
+ * Left sidebar: PMIS file section, Active Project card, Sections list.
  * Browser version — uses a hidden <input type="file"> for PMIS CSV selection.
  */
 import React, { useRef } from 'react';
-import ProjectList from './ProjectList';
 import SectionList from './SectionList';
 
 export default function Sidebar({
@@ -13,11 +12,8 @@ export default function Sidebar({
   pmisLoading,
   pmisProgress,
   onLoadPmis,
-  projects,
-  selectedProjectId,
-  onSelectProject,
-  onRenameProject,
-  onDeleteProject,
+  selectedProject,
+  onOpenProjectsModal,
   sections,
   selectedSectionId,
   onSelectSection,
@@ -111,30 +107,96 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Scrollable area for projects + sections */}
-      <div className="sidebar__scrollable">
-        <ProjectList
-          projects={projects}
-          selectedProjectId={selectedProjectId}
-          onSelect={onSelectProject}
-          onRename={onRenameProject}
-          onDelete={onDeleteProject}
-        />
+      {/* Active Project section */}
+      <div className="sidebar__section" style={{ borderBottom: '1px solid var(--border-default)', paddingBottom: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div className="sidebar__section-title" style={{ marginBottom: 0 }}>Active Project</div>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            style={{ fontSize: '11px', padding: '2px 8px', height: '22px' }}
+            onClick={onOpenProjectsModal}
+            title="Open or switch projects"
+          >
+            📁 Projects…
+          </button>
+        </div>
 
-        {selectedProjectId && (
-          <>
-            <div className="divider" style={{ margin: '4px 0' }} />
-            <SectionList
-              sections={sections}
-              selectedSectionId={selectedSectionId}
-              onSelect={onSelectSection}
-              onAddSections={onAddSections}
-              onUpdateSection={onUpdateSection}
-              onDelete={onDeleteSection}
-              pmisMap={pmisMap}
-              addToast={addToast}
-            />
-          </>
+        {selectedProject ? (
+          <div
+            onClick={onOpenProjectsModal}
+            style={{
+              padding: '8px 10px',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              transition: 'background var(--t-fast), border-color var(--t-fast)',
+            }}
+            title="Click to switch projects"
+            onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
+            onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-default)'}
+          >
+            <div style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
+              <div style={{
+                fontWeight: 600,
+                fontSize: 'var(--text-sm)',
+                color: 'var(--text-heading)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}>
+                <span style={{ fontSize: '13px' }}>📁</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedProject.name}
+                </span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 2 }}>
+                {sections.length} {sections.length === 1 ? 'section' : 'sections'}
+              </div>
+            </div>
+            <span style={{ fontSize: '11px', color: 'var(--accent-primary)', fontWeight: 500, flexShrink: 0 }}>
+              Change
+            </span>
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '8px 0' }}>
+            <div className="sidebar__pmis-empty" style={{ marginBottom: 6 }}>No project selected</div>
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              style={{ width: '100%', justifyContent: 'center' }}
+              onClick={onOpenProjectsModal}
+            >
+              Open Project…
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Scrollable area dedicated to sections */}
+      <div className="sidebar__scrollable">
+        {selectedProject ? (
+          <SectionList
+            sections={sections}
+            selectedSectionId={selectedSectionId}
+            onSelect={onSelectSection}
+            onAddSections={onAddSections}
+            onUpdateSection={onUpdateSection}
+            onDelete={onDeleteSection}
+            pmisMap={pmisMap}
+            addToast={addToast}
+          />
+        ) : (
+          <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+            Select or open a project to view and manage sections.
+          </div>
         )}
       </div>
     </aside>
